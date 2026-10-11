@@ -47,6 +47,15 @@ body {
 	background-color: #666;
 }
 
+/* A greyed-out button lets the mouse through to its wrapper, so its tooltip still shows */
+.toolbar-button-wrap {
+	display: inline-flex;
+}
+
+.toolbar-button:disabled {
+	pointer-events: none;
+}
+
 .toolbar-button:disabled {
 	cursor: default;
 	opacity: 0.3;

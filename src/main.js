@@ -2,14 +2,16 @@ import { app, BrowserWindow, ipcMain, Menu, shell, powerSaveBlocker } from 'elec
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 
-import {discover, connect, auto_connect, show_opened, disconnect, write_cue, fire_sound_check, reset_console_state, get_console_status, sync_channel_monitor} from './main/sound.js';
-import {showEvents, loadShow, getShow, getShowState, saveShow, setDcaLevel, setConsoleSetup, undoDcaLevel, redoDcaLevel, isShowDirty, confirmDiscardChanges} from './main/showManager.js';
+import {discover, connect, auto_connect, show_opened, disconnect, write_cue, fire_sound_check, reset_console_state, get_console_status, sync_channel_monitor, consoleEvents, get_backup_status, toggle_backup, assign_spare, capture_channel_settings} from './main/sound.js';
+import {showEvents, loadShow, getShow, getShowState, saveShow, setDcaLevel, setConsoleSetup, editShow, undoEdit, redoEdit, isShowDirty, confirmDiscardChanges} from './main/showManager.js';
 import {qlabEvents, syncQLab, recallQLabCue, getQLabStatus, stopQLab} from './main/qlab.js';
 import {startOscServer, stopOscServer, notifyCueFired} from './main/oscServer.js';
+import {getActiveCueInfo, setActiveCue, markCue, getMarks, clearMarks} from './main/cueInfo.js';
+import {syncReaper, reaperCueFired} from './main/reaper.js';
 import {syncConsoleButtons, setButtonActionHandler, buttonEvents, effectiveButtonMap, serializeButtonMap, getButtonSetup} from './main/consoleButtons.js';
 
 import {handle_open_file} from './main/fileManager.js';
-import {initMenu, sendViewSettings, sendMenuAction, setLockEditing} from './main/menuManager.js';
+import {initMenu, updateMenu, sendViewSettings, sendMenuAction, setLockEditing, setEditorSelection, handleNewShow} from './main/menuManager.js';
 import {getSettings, updateSettings} from './main/settings.js';
 import fs from 'node:fs';
 // import {open_dialog} from './main/dialog.js';
@@ -45,12 +47,15 @@ ipcMain.handle('presonus:write_cue', async (event, args) => {
 	}
 
 	notifyCueFired(cue_object);
+	setActiveCue(cue_object);
+	reaperCueFired(cue_object);
 
 	return write_cue(event, args);
 });
 
 ipcMain.handle('presonus:fire_sound_check', async (event, args) => {
 	notifyCueFired(null);
+	setActiveCue(null);
 	return fire_sound_check(event, args);
 });
 
@@ -70,6 +75,7 @@ ipcMain.handle('show:load', async (_, path) => {
 	if (!(await confirmDiscardChanges())) { return null; }
 
 	const show = loadShow(path);
+	clearMarks();
 
 	// New show: the next cue rewrites every DCA, and the editor starts on Line Checks
 	// (which goes on the console now if it's connected)
@@ -82,14 +88,59 @@ ipcMain.handle('show:set_dca_level', async (_, {number, point, dca, level}) => {
 	return setDcaLevel(number, point, dca, level);
 });
 
-ipcMain.handle('show:undo_dca_level', async () => { return undoDcaLevel(); });
-ipcMain.handle('show:redo_dca_level', async () => { return redoDcaLevel(); });
+// Show edits (utils/show_edits.js), one undo step per call
+ipcMain.handle('show:edit', async (_, ops) => {
+	try {
+		const {show, results} = editShow(ops);
+		return {ok: true, show, results};
+	} catch (error) {
+		return {ok: false, error: error.message};
+	}
+});
+ipcMain.handle('show:undo', async () => { return undoEdit(); });
+ipcMain.handle('show:redo', async () => { return redoEdit(); });
+
+// Show / Actor Setup → Store from console: a line's gain / HPF / EQ / dynamics
+ipcMain.handle('presonus:capture_settings', async (_, {channel, sections}) => capture_channel_settings(channel, sections));
+
+// Backup channels: the cue list's tray
+ipcMain.handle('presonus:get_backups', async () => get_backup_status());
+ipcMain.handle('presonus:toggle_backup', async (_, main) => toggle_backup(main));
+ipcMain.handle('presonus:assign_spare', async (_, main) => assign_spare(main));
+consoleEvents.on('backups', (status) => getMainWindow()?.webContents.send('backup-status', status));
+
+// Active Cue Info window, and cue marks / notes (main/cueInfo.js)
+ipcMain.handle('cue-info:get', async () => getActiveCueInfo());
+ipcMain.handle('marks:mark', async (_, {key, note}) => markCue(key, note));
+ipcMain.handle('marks:get', async () => getMarks());
+
+// The cue list's selection (enables Edit menu items)
+ipcMain.handle('editor:set_selection', async (_, selection) => { setEditorSelection(selection); });
+
+// Right-click a cue number / text: TheatreMix's highlight colors. Returns the chosen color's
+// index (0 = none), or null if the menu was dismissed.
+const CUE_COLOR_NAMES = ['None', 'Red', 'Yellow', 'Green', 'Blue', 'Purple'];
+ipcMain.handle('editor:color_menu', async (event, current) => new Promise((resolve) => {
+	let chosen = null;
+	const menu = Menu.buildFromTemplate(CUE_COLOR_NAMES.map((label, index) => ({
+		label, type: 'checkbox', checked: Number(current) === index, click: () => { chosen = index; },
+	})));
+	menu.popup({window: BrowserWindow.fromWebContents(event.sender), callback: () => resolve(chosen)});
+}));
 
 ipcMain.handle('show:get', async () => { return getShow(); });
 
 // Toolbar buttons go through the same paths as the menu
-ipcMain.handle('menu:trigger', async (_, action) => { sendMenuAction(action); });
+ipcMain.handle('menu:trigger', async (_, action) => {
+	// New Show runs in the main process (it asks about unsaved changes first)
+	if (action === 'new-show') return handleNewShow();
+	sendMenuAction(action);
+});
+// Toolbar Undo / Redo are greyed out when there's nothing to undo / redo
+ipcMain.handle('show:edit_state', async () => { const {canUndo, canRedo} = getShowState(); return {canUndo, canRedo}; });
 ipcMain.handle('app:set_lock_editing', async (_, locked) => { setLockEditing(locked); });
+// Toolbar View Positions (View → Positions)
+ipcMain.handle('app:set_show_positions', async (_, on) => { updateSettings({showPositions: !!on}); sendViewSettings(); updateMenu(); });
 ipcMain.handle('show:save', async () => { return saveShow(); });
 ipcMain.handle('show:can_save', async () => { return getShowState().canSave; });
 
@@ -110,8 +161,8 @@ ipcMain.handle('app:set_recall_settings', async (_, changes) => {
 let autoConnectStarted = false;
 
 ipcMain.handle('app:get_view_settings', async () => {
-	const {rowSize, lockEditing} = getSettings();
-	return {rowSize, lockEditing};
+	const {rowSize, lockEditing, showPositions, colorBlindDca} = getSettings();
+	return {rowSize, lockEditing, showPositions, colorBlindDca};
 });
 
 ipcMain.handle('electronAPI:openFile', handle_open_file);
@@ -277,7 +328,11 @@ app.whenReady().then(() => {
 	let lastButtonMap;
 	showEvents.on('changed', () => {
 		getMainWindow()?.webContents.send('show-can-save', getShowState().canSave);
+		const {canUndo, canRedo} = getShowState();
+		getMainWindow()?.webContents.send('show-edit-state', {canUndo, canRedo});
 		syncQLab(getShow());
+		syncReaper(getShow());
+		getMainWindow()?.webContents.send('backup-status', get_backup_status());
 		sync_channel_monitor();
 
 		const {map, source} = effectiveButtonMap(getShow());

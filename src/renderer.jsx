@@ -6,6 +6,7 @@ import './index.css';
 
 import App from './components/App';
 import Settings from './components/Settings';
+import ActiveCueInfo from './components/ActiveCueInfo';
 
 
 const container = document.getElementById("root");
@@ -15,6 +16,7 @@ const root = ReactDOM.createRoot(container).render(
       <Routes>
         <Route path="/" element={<App />} />
         <Route path="/popup/" element={<Settings/>} />
+        <Route path="/active-cue/" element={<ActiveCueInfo/>} />
       </Routes>
     </Router>
   </React.StrictMode>

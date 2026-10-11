@@ -70,11 +70,11 @@ const level_to_fader = (level) => {
 }
 
 /**
- * Fader position (0-100) -> dB, rounded to 0.5 dB
+ * Fader position (0-100) -> dB, unrounded (for nudging a fader by a fraction of a dB)
  * @param {Number} fader position
  * @returns {Number} level dB
  */
-const fader_to_level = (fader) => {
+const fader_to_level_exact = (fader) => {
 	if (fader <= 0) return MIN_DCA_LEVEL;
 	if (fader >= 100) return MAX_DCA_LEVEL;
 
@@ -85,11 +85,18 @@ const fader_to_level = (fader) => {
 		if (level_to_fader(mid) < fader) low = mid; else high = mid;
 	}
 
-	return clamp_dca_level(Math.round(((low + high) / 2) * 2) / 2);
+	return (low + high) / 2;
 }
+
+/**
+ * Fader position (0-100) -> dB, rounded to 0.5 dB
+ * @param {Number} fader position
+ * @returns {Number} level dB
+ */
+const fader_to_level = (fader) => clamp_dca_level(Math.round(fader_to_level_exact(fader) * 2) / 2);
 
 export {
 	MIN_DCA_LEVEL, MAX_DCA_LEVEL, DEFAULT_DCA_LEVEL, NEW_DCA_LEVEL,
 	dca_level_key, get_dca_level, clamp_dca_level, format_dca_level,
-	level_to_fader, fader_to_level
+	level_to_fader, fader_to_level, fader_to_level_exact
 };

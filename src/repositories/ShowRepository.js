@@ -47,6 +47,8 @@ class ShowRepository {
 
         show.consoleSetup = this.loadConsoleSetup();
 
+        show.channelSettings = this.loadChannelSettings();
+
         return show;
     }
 
@@ -94,6 +96,46 @@ class ShowRepository {
         return Object.fromEntries(
             this.db.all('SELECT param, value FROM consoleSetup').map((row) => [row.param, row.value ?? ""])
         );
+    }
+
+    /**
+     * Load stored StudioLive channel settings (only present in .tmixp files)
+     * @returns {{owner: String, section: String, data: String}[]}
+     */
+    loadChannelSettings() {
+
+        const exists = this.db.get(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'channelSettings'"
+        );
+
+        return exists ? this.db.all('SELECT owner, section, data FROM channelSettings') : [];
+    }
+
+    /**
+     * Replace the stored StudioLive channel settings (profiles' / actors' gain, HPF, EQ, dynamics)
+     * @param {{owner: String, section: String, data: String}[]} rows
+     */
+    saveChannelSettings(rows) {
+
+        const save = this.db.transaction(() => {
+
+            this.db.run(`
+                CREATE TABLE IF NOT EXISTS channelSettings (
+                    owner   TEXT NOT NULL,
+                    section TEXT NOT NULL,
+                    data    TEXT,
+                    PRIMARY KEY (owner, section)
+                )
+            `);
+
+            this.db.run('DELETE FROM channelSettings');
+
+            for (const row of rows ?? []) {
+                this.db.run('INSERT INTO channelSettings (owner, section, data) VALUES (?, ?, ?)', [row.owner, row.section, row.data]);
+            }
+        });
+
+        save();
     }
 
     /**
@@ -157,6 +199,78 @@ class ShowRepository {
         });
 
         save();
+    }
+
+    /**
+     * Write every TheatreMix table the editor changes. Each row only gets the table's own
+     * columns (so rows from older / newer TheatreMix versions still fit).
+     * @param {ShowFile} show
+     */
+    saveShowTables(show) {
+
+        const save = this.db.transaction(() => {
+
+            this.addDcaColumns(show);
+
+            for (const [table, rows] of Object.entries({
+                cues: show.cues,
+                profiles: show.profiles,
+                ensembles: show.ensembles,
+                positions: show.positions,
+                actors: show.actors,
+                actorGroups: show.actorGroups,
+                actorProfiles: show.actorProfiles,
+            })) {
+                this.replaceRows(table, rows ?? []);
+            }
+
+            this.replaceRows('config', Object.entries(show.config ?? {}).map(([param, value]) => ({param, value})));
+        });
+
+        save();
+    }
+
+    /**
+     * TheatreMix's cues table has 12 DCAs; a show using the StudioLive's other DCAs (13-24) gets
+     * their columns added (TheatreMix ignores them)
+     * @param {ShowFile} show
+     */
+    addDcaColumns(show) {
+
+        const columns = new Set(this.db.all('PRAGMA table_info("cues")').map((c) => c.name));
+        for (let dca = 13; dca <= 24; dca++) {
+            for (const kind of ['Channels', 'Label']) {
+                const name = `dca${dca}${kind}`;
+                const used = show.cues.some((cue) => cue[name] !== undefined && cue[name] !== null && cue[name] !== "");
+                if (used && !columns.has(name)) this.db.run(`ALTER TABLE cues ADD COLUMN "${name}" TEXT`);
+            }
+        }
+    }
+
+    /**
+     * Replace a table's rows
+     * @param {String} table
+     * @param {Object[]} rows
+     */
+    replaceRows(table, rows) {
+
+        const columns = this.db.all(`PRAGMA table_info("${table}")`).map((c) => c.name);
+        if (!columns.length) return;
+
+        this.db.run(`DELETE FROM "${table}"`);
+
+        const stmt = this.db.db.prepare(
+            `INSERT INTO "${table}" (${columns.map((c) => `"${c}"`).join(',')}) VALUES (${columns.map(() => '?').join(',')})`
+        );
+
+        for (const row of rows) {
+            stmt.run(columns.map((c) => {
+                const v = row[c];
+                if (v === undefined) return null;
+                if (typeof v === 'boolean') return v ? 1 : 0;
+                return v;
+            }));
+        }
     }
 
     saveConfig(show) {

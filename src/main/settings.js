@@ -15,6 +15,10 @@ const DEFAULTS = {
 	recentFiles: [],
 	/** @type {'small' | 'medium' | 'large'} cue list row size */
 	rowSize: 'medium',
+	/** View → Positions: position codes in the cue list's DCA cells */
+	showPositions: false,
+	/** View → Color-Blind DCA Colors: TheatreMix's color-blind palette (cue list and console) */
+	colorBlindDca: false,
 	/** Prevent edits (e.g. DCA levels) in the cue list */
 	lockEditing: false,
 	/** A person's DCA fader level follows them when they move to another DCA */
@@ -28,7 +32,7 @@ const DEFAULTS = {
 };
 
 // On/off preferences, checked when loading
-const BOOLEAN_SETTINGS = ['lockEditing', 'levelsFollowPeople', 'restoreOnBack', 'autoConnect'];
+const BOOLEAN_SETTINGS = ['lockEditing', 'levelsFollowPeople', 'restoreOnBack', 'autoConnect', 'showPositions', 'colorBlindDca'];
 
 let settings = null;
 

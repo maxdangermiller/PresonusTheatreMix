@@ -49,6 +49,12 @@ class ShowFile {
      */
     consoleSetup;
 
+    /**
+     * Stored StudioLive channel settings for profiles / actors (stored in .tmixp files)
+     * @type {{owner: String, section: String, data: String}[]}
+     */
+    channelSettings;
+
     constructor() {
 
         this.actors = [];
@@ -66,6 +72,8 @@ class ShowFile {
         this.dcaLevels = {};
 
         this.consoleSetup = {};
+
+        this.channelSettings = [];
     }
 }
 

@@ -48,6 +48,11 @@ let channels = [];
 /** Channels in the current cue's DCAs (yellow when they have signal) */
 let activeChannels = new Set();
 
+// Show Setup → Console: "Channel monitoring" (blue / red from the meters) and the yellow
+// "in the current cue" highlight. Both on unless the show turns them off.
+let monitoring = true;
+let highlight = true;
+
 /**
  * Per channel: {lastSignal: ms, silent: boolean, clipUntil: ms (0 = not clipping), sent: color last sent | null, level: dB}
  * @type {Map<number, {lastSignal: number, silent: boolean, clipUntil: number, sent: string | null, level: number}>}
@@ -76,9 +81,9 @@ const stateFor = (ch) => {
  */
 const applyColor = (ch, reason) => {
 	const state = stateFor(ch);
-	const color = Date.now() < state.clipUntil ? COLORS.clip
-		: state.silent ? COLORS.silent
-		: activeChannels.has(ch) ? COLORS.active
+	const color = monitoring && Date.now() < state.clipUntil ? COLORS.clip
+		: monitoring && state.silent ? COLORS.silent
+		: highlight && activeChannels.has(ch) ? COLORS.active
 		: COLORS.signal;
 
 	if (state.sent === color || client === null) return;
@@ -209,6 +214,14 @@ const setMonitoredChannels = (show, fallback) => {
 		.filter((ch) => Number.isInteger(ch) && ch > 0);
 
 	const next = fromShow.length ? fromShow : fallback;
+
+	const options = {monitoring: show?.config?.enableChannelMonitoring !== "0", highlight: show?.config?.activeChannelHighlight !== "0"};
+	if (options.monitoring !== monitoring || options.highlight !== highlight) {
+		({monitoring, highlight} = options);
+		debugLog('METERS', `Channel monitoring ${monitoring ? "on" : "off"}, current cue highlight ${highlight ? "on" : "off"}`);
+		for (const ch of channels) applyColor(ch, "show settings changed");
+	}
+
 	if (next.join(",") === channels.join(",")) return;
 
 	channels = next;

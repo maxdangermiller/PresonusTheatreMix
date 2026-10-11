@@ -89,18 +89,21 @@ export const AssignIcon = () => (
 	</Icon>
 );
 
-export const FxColumnIcon = () => (
-	<Icon>
-		<path d="M5 2v20M5 2h4M5 22h4" />
-		<text x="11" y="18" fontSize="8" fontWeight="bold" fill="currentColor" stroke="none" fontFamily="Arial, sans-serif">FX</text>
-	</Icon>
-);
-
 export const PositionsColumnIcon = () => (
 	<Icon>
 		<path d="M5 2v20M5 2h4M5 22h4" />
 		<path d="M15 21s-4-4.2-4-7.5a4 4 0 0 1 8 0c0 3.3-4 7.5-4 7.5z" />
 		<circle cx="15" cy="13.5" r="1.4" />
+	</Icon>
+);
+
+// Store from console: a channel strip's EQ curve going into a box
+export const StoreSettingsIcon = () => (
+	<Icon>
+		<path d="M4 9c2.5 0 3-4 5-4s2.5 6 5 6 3-3 6-3" />
+		<path d="M12 13v7" />
+		<path d="M9 17l3 3 3-3" />
+		<path d="M4 15v5h16v-5" />
 	</Icon>
 );
 

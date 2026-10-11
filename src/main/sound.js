@@ -9,7 +9,9 @@ import {attachConsoleButtons, detachConsoleButtons, syncConsoleButtons} from './
 import {debugLog} from './debugLog.js';
 import {getSettings, updateSettings} from './settings.js';
 import {attachChannelMonitor, detachChannelMonitor, resetChannelMonitor, setMonitoredChannels, setActiveChannels} from './channelMonitor.js';
-import {get_dca_level, fader_to_level, level_to_fader, format_dca_level, NEW_DCA_LEVEL} from '../utils/dca_levels.js';
+import {get_dca_level, fader_to_level, fader_to_level_exact, level_to_fader, format_dca_level, NEW_DCA_LEVEL} from '../utils/dca_levels.js';
+import {next_cue, dca_next_state, color_blind_state} from '../utils/dca_state.js';
+import {parse_map, default_profile, profile_flags, SETTING_SECTIONS, show_dcas} from '../utils/show_edits.js';
 
 import {convert_ip_to_octets, is_ip_valid} from '../utils/ip_tools';
 import Actor from '../models/Actor.js';
@@ -38,6 +40,9 @@ const DIM_FADER = 0.5;
 let presonusClient = null; 
 
 const CONTROLLED_LINES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+
+// The most DCAs a show can use (Show Setup → "Use all 24 DCAs")
+const MAX_SHOW_DCAS = 24;
 
 // UCNet ports. Consoles broadcast a "DA" announce packet from CONTROL_PORT to
 // 255.255.255.255:DISCOVERY_PORT roughly every 2.5 seconds.
@@ -141,6 +146,54 @@ let dca_mutes = new Map();
  * @type {Map<number, boolean>}
  */
 let line_mutes = new Map();
+
+/**
+ * Level offsets (TheatreMix: Show Setup → "Store level offsets", Assign → Offset): the offset
+ * each line's fader has been moved by (dB), and line fader positions (0-100) since connecting
+ * @type {Map<number, number>}
+ */
+let line_offsets = new Map();
+let line_faders = new Map();
+
+// TheatreMix doesn't move faders that are below this (a channel that's been pulled out)
+const OFFSET_FLOOR_DB = -30;
+
+/**
+ * Backup channels (TheatreMix: Show Setup → Backup, "backupChannels" = "backup=main", and a
+ * spare backup channel). A main channel switched to its backup has its DCA assignments, name
+ * (with a ~) and unmute moved to the backup; the main is muted. Switched by pressing the DCA's
+ * mute button on the console, or double-clicking it in the cue list's backup tray.
+ * @type {Set<number>} main channels using their backup
+ */
+let switched = new Set();
+/** @type {number | null} main channel the spare backup is standing in for */
+let spare_for = null;
+
+/**
+ * Stored channel settings (TheatreMix's profiles: Store Gain / HPF / EQ / Dyn): the StudioLive
+ * line parameters in each section (0-1, as the console sends them)
+ */
+const SETTING_PARAMS = {
+	gain: ['preampgain', 'digitalgain'],
+	hpf: ['filter/hpf'],
+	eq: ['eq/eqallon', ...[1, 2, 3, 4].flatMap((b) => ['eqtype', 'eqgain', 'eqq', 'eqfreq', 'eqbandon', 'eqbandop'].map((p) => `eq/${p}${b}`))],
+	dyn: ['comp/on', 'comp/softknee', 'comp/automode', 'comp/threshold', 'comp/ratio', 'comp/attack', 'comp/release', 'comp/gain', 'comp/kneewidth',
+		'gate/on', 'gate/expander', 'gate/threshold', 'gate/range', 'gate/attack', 'gate/release', 'gate/ratio',
+		'limit/limiteron', 'limit/threshold', 'limit/release'],
+};
+const SETTING_PARAM = new RegExp(`^line/ch(\\d+)/(${Object.values(SETTING_PARAMS).flat().join("|")})$`);
+
+/** Line parameter values we've seen or sent since connecting ("line/ch3/eq/eqgain1" -> 0.5) */
+let param_values = new Map();
+/** What each line was last sent: channel -> {section: JSON of the values} */
+let applied_settings = new Map();
+
+/**
+ * DCA mutes we sent recently: the console may echo them, and they mustn't look like presses
+ * @type {Map<number, {muted: boolean, at: number}>}
+ */
+const sent_dca_mutes = new Map();
+const ECHO_MS = 1500;
 
 /**
  * Each cue's DCAs as they were when it was last left: {channels, fader, muted} per DCA,
@@ -478,6 +531,10 @@ const do_connect = async (host, port, name) => {
 	dca_faders = new Map();
 	dca_mutes = new Map();
 	line_mutes = new Map();
+	line_offsets = new Map();
+	line_faders = new Map();
+	param_values = new Map();
+	applied_settings = new Map();
 
 	// Console mute group buttons as Go / Back
 	attachConsoleButtons(client);
@@ -492,7 +549,11 @@ const do_connect = async (host, port, name) => {
 		// DCA muted / unmuted on the console
 		const mute = /^filtergroup\/ch(\d+)\/mute$/.exec(name);
 		if (mute && typeof value === 'boolean') {
-			dca_mutes.set(Number(mute[1]), value);
+			const dca = Number(mute[1]);
+			dca_mutes.set(dca, value);
+			const sent = sent_dca_mutes.get(dca);
+			const echo = sent && sent.muted === value && Date.now() - sent.at < ECHO_MS;
+			if (value && !echo) dca_mute_pressed(dca);
 			return;
 		}
 
@@ -500,6 +561,22 @@ const do_connect = async (host, port, name) => {
 		const line_mute = /^line\/ch(\d+)\/mute$/.exec(name);
 		if (line_mute && typeof value === 'boolean') {
 			line_mutes.set(Number(line_mute[1]), value);
+			return;
+		}
+
+		// A line's gain / HPF / EQ / dynamics changed on the console (for "store from console").
+		// The library only converts parameters it knows; the rest arrive as the raw float.
+		if (SETTING_PARAM.test(name)) {
+			const number = Buffer.isBuffer(value) && value.length >= 4 ? value.readFloatLE(0)
+				: typeof value === 'boolean' ? (value ? 1 : 0) : Number(value);
+			if (Number.isFinite(number)) param_values.set(name, number);
+			return;
+		}
+
+		// Line fader moved on the console (PV volumes are 0-1)
+		const line_volume = /^line\/ch(\d+)\/volume$/.exec(name);
+		if (line_volume && typeof value === 'number') {
+			line_faders.set(Number(line_volume[1]), value * 100);
 			return;
 		}
 
@@ -555,6 +632,7 @@ const do_connect = async (host, port, name) => {
 			dca_faders = new Map();
 			dca_mutes = new Map();
 			line_mutes = new Map();
+			line_faders = new Map();
 			dca_colors = new Map();
 			resync_after_reconnect(client);
 
@@ -655,15 +733,18 @@ const set_fader = (selector, position) => {
  * Tolerates missing fields and numeric values (e.g. a cue with only labels)
  * @param {Cue} cue
  * @param {Number} dca DCA number (1-12)
+ * @param {{raw?: boolean}} options raw: the show's channels, not their backups
  * @return {Number[]} channel numbers
  */
-const get_dca_channels = (cue, dca) => {
+const get_dca_channels = (cue, dca, {raw = false} = {}) => {
 	const value = cue?.[`dca${String(dca).padStart(2, "0")}Channels`];
 
-	return String(value ?? "")
+	const channels = String(value ?? "")
 		.split(",")
 		.map(Number)
 		.filter((ch) => Number.isInteger(ch) && ch > 0);
+	// Channels switched to their backup are carried by the backup (raw: the show's own channels)
+	return raw ? channels : channels.map(live_channel);
 }
 
 /**
@@ -678,7 +759,7 @@ const get_cue_channels = () => {
 	let arr = [];
 
 	// The same DCAs write_dcas writes (the console may have fewer than 8)
-	for (let i = 1; i <= get_dca_count(); i++) {
+	for (const i of get_dca_list()) {
 		arr.push(...get_dca_channels(current_cue, i));
 	}
 
@@ -726,7 +807,7 @@ const resync_after_reconnect = (client) => {
 		for (const [dca, applied] of Object.entries(applied_dcas)) {
 			if (!applied) continue;
 
-			const channels = CONTROLLED_LINES
+			const channels = all_lines()
 				.filter((n) => is_on(snapshot_get(snapshot, `filtergroup/ch${dca}/line${n}`)))
 				.join(",");
 			const name = snapshot_get(snapshot, `filtergroup/ch${dca}/name`) ?? "";
@@ -792,6 +873,10 @@ const show_opened = () => {
 	reset_console_state();
 	current_cue = null;
 	last_fired = null;
+	// Backup switches belong to the show that was open
+	switched = new Set();
+	spare_for = null;
+	consoleEvents.emit('backups', get_backup_status());
 
 	if (presonusClient !== null && console_status.state === 'connected') apply_active_cue();
 }
@@ -803,6 +888,7 @@ const show_opened = () => {
  */
 const reset_console_state = () => {
 	applied_dcas = {};
+	applied_settings = new Map();
 	line_names = {};
 	channel_levels = new Map();
 	dca_colors = new Map();
@@ -837,8 +923,95 @@ const read_dca_mute = (dca) => {
  */
 const set_dca_mute = (dca, muted) => {
 	const selector = {type: 'DCA', channel: dca};
+	sent_dca_mutes.set(dca, {muted, at: Date.now()});
 	if (muted) presonusClient.mute(selector); else presonusClient.unmute(selector);
 	dca_mutes.set(dca, muted);
+}
+
+/**
+ * Backup pairs: main channel -> backup channel (the spare included while it's standing in)
+ * @returns {Map<number, number>}
+ */
+const get_backups = () => {
+	const backups = new Map();
+	for (const [backup, main] of parse_map(getShow()?.config?.backupChannels)) backups.set(Number(main), Number(backup));
+	const spare = get_spare();
+	if (spare && spare_for !== null) backups.set(spare_for, spare);
+	return backups;
+}
+
+/** The spare backup channel (Show Setup), or null */
+const get_spare = () => {
+	const spare = Number(getShow()?.config?.spareBackup);
+	return Number.isInteger(spare) && spare > 0 ? spare : null;
+}
+
+/** The channel actually carrying a show channel right now (its backup if it's switched) */
+const live_channel = (ch) => switched.has(ch) ? (get_backups().get(ch) ?? ch) : ch;
+
+/** Every line the app manages: the show's channels, their backups and the spare */
+const all_lines = () => [...new Set([
+	...CONTROLLED_LINES, ...get_show_channels(), ...get_backups().values(), ...(get_spare() ? [get_spare()] : []),
+])].sort((a, b) => a - b);
+
+/**
+ * Backup status for the cue list's tray
+ * @returns {{pairs: {main: Number, backup: Number, label: String, switched: Boolean, spare: Boolean}[], spare: Number | null, spareFor: Number | null}}
+ */
+const get_backup_status = () => ({
+	pairs: [...get_backups()].map(([main, backup]) => ({
+		main, backup, label: get_profile_label(main) || `Ch ${main}`, switched: switched.has(main), spare: backup === get_spare() && spare_for === main,
+	})).sort((a, b) => a.main - b.main),
+	spare: get_spare(),
+	spareFor: spare_for,
+});
+
+/** The tray and the console need updating after a switch */
+const backups_changed = () => {
+	consoleEvents.emit('backups', get_backup_status());
+	if (presonusClient === null) return;
+	if (last_fired?.type === 'linecheck') { set_soundcheck_labels(); write_line_mutes([], 'mute'); }
+	else if (current_cue) write_cue(null, {cue_object: current_cue});
+}
+
+/**
+ * Switch a show channel to its backup, or back (tray double-click, DCA mute button)
+ * @param {Number} main
+ */
+const toggle_backup = (main) => {
+	if (!get_backups().has(main)) return get_backup_status();
+	if (switched.has(main)) switched.delete(main); else switched.add(main);
+	debugLog('BACKUP', `Channel ${main} -> ${switched.has(main) ? `backup channel ${get_backups().get(main)}` : "back to its own channel"}`);
+	backups_changed();
+	return get_backup_status();
+}
+
+/**
+ * Stand the spare backup in for a channel (switched to it straight away), or free it (null)
+ * @param {Number | null} main
+ */
+const assign_spare = (main) => {
+	if (spare_for !== null) switched.delete(spare_for);
+	spare_for = main;
+	if (main !== null) switched.add(main);
+	debugLog('BACKUP', main === null ? "Spare backup freed" : `Spare backup channel ${get_spare()} standing in for channel ${main}`);
+	backups_changed();
+	return get_backup_status();
+}
+
+/**
+ * A DCA's mute button pressed on the console: like TheatreMix, it switches the DCA's channels
+ * that have a backup (unless the show turns that off), and the DCA is unmuted again
+ * @param {Number} dca
+ */
+const dca_mute_pressed = (dca) => {
+	if (getShow()?.config?.suppressDCAMuteBackupSwitch === "1" || !current_cue) return;
+	const mains = get_dca_channels(current_cue, dca, {raw: true}).filter((ch) => get_backups().has(ch));
+	if (!mains.length) return;
+	debugLog('BACKUP', `DCA ${dca} mute pressed: switching ch ${mains.join(", ")}`);
+	for (const ch of mains) if (switched.has(ch)) switched.delete(ch); else switched.add(ch);
+	set_dca_mute(dca, false);
+	backups_changed();
 }
 
 /**
@@ -879,7 +1052,8 @@ const write_line_mutes = (cue_channels, pass) => {
 
 	const assigned = new Set(cue_channels);
 	const changed = [];
-	for (const ch of get_show_channels()) {
+	// The show's channels and their backups (a switched channel's backup carries it)
+	for (const ch of new Set([...get_show_channels(), ...get_backups().values()])) {
 		const muted = !assigned.has(ch);
 		if (muted !== (pass === 'mute') || read_line_mute(ch) === muted) continue;
 
@@ -892,6 +1066,164 @@ const write_line_mutes = (cue_channels, pass) => {
 	if (changed.length) {
 		debugLog('MUTES', `${pass === 'mute' ? "Muted (not on a DCA)" : "Unmuted (on a DCA)"}: ch ${changed.join(", ")}`);
 	}
+}
+
+/**
+ * A line parameter's value on the console right now
+ * @param {Number} ch
+ * @param {String} param e.g. "eq/eqgain1"
+ * @returns {Number | null}
+ */
+const read_param = (ch, param) => {
+	const key = `line/ch${ch}/${param}`;
+	let value = param_values.get(key) ?? presonusClient?.state.get(key);
+	if (Buffer.isBuffer(value) && value.length >= 4) value = value.readFloatLE(0);
+	else if (value && typeof value === 'object' && 'value' in value) value = value.value;
+	if (typeof value === 'boolean') value = value ? 1 : 0;
+	return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Send a line parameter (the library has no general setter, so the PV message directly)
+ * @param {Number} ch
+ * @param {String} param
+ * @param {Number} value 0-1
+ */
+const send_param = (ch, param, value) => {
+	const key = `line/ch${ch}/${param}`;
+	const float = Buffer.alloc(4);
+	float.writeFloatLE(Number(value));
+	presonusClient._sendPacket('PV', Buffer.concat([Buffer.from(`${key}\0\0\0`), float]));
+	param_values.set(key, Number(value));
+}
+
+/**
+ * Show Setup / Actor Setup → Store from console: a line's current settings
+ * @param {Number} ch
+ * @param {String[]} sections e.g. ['gain', 'eq']
+ * @returns {{ok: true, settings: Object<string, Object>} | {ok: false, error: String}}
+ */
+const capture_channel_settings = (ch, sections) => {
+	if (presonusClient === null || console_status.state !== 'connected') return {ok: false, error: "Connect to the console first"};
+	const live = live_channel(ch);
+	const settings = {};
+	for (const section of sections.filter((x) => SETTING_PARAMS[x])) {
+		const values = Object.fromEntries(SETTING_PARAMS[section].map((p) => [p, read_param(live, p)]).filter(([, v]) => v !== null));
+		if (Object.keys(values).length) settings[section] = values;
+	}
+	debugLog('SETTINGS', `Stored channel ${live}'s ${Object.keys(settings).join(", ") || "nothing"} from the console`);
+	return {ok: true, settings};
+}
+
+/**
+ * The stored settings a channel should have with a profile (TheatreMix): each section the
+ * profile stores comes from the active actor (if the profile stores it per actor) or the
+ * profile; sections it doesn't store come from the channel's default profile the same way
+ * @param {Number} ch
+ * @param {Object} profile
+ * @returns {Object<string, Object>} section -> {param: value}
+ */
+const settings_for = (ch, profile) => {
+	const show = getShow();
+	const rows = show?.channelSettings ?? [];
+	const stored = (owner, section) => {
+		const row = rows.find((r) => r.owner === owner && r.section === section);
+		try { return row ? JSON.parse(row.data) : null; } catch { return null; }
+	};
+	const actor = get_actor(ch);
+	const from = (p, section) => {
+		if (!p) return null;
+		const flags = profile_flags(p);
+		return (actor && flags.actor.has(section) ? stored(`actor:${actor.id}:${p.id}`, section) : null)
+			?? (flags.store.has(section) ? stored(`profile:${p.id}`, section) : null);
+	};
+	const fallback = default_profile(show, ch);
+	const out = {};
+	for (const section of SETTING_SECTIONS) {
+		const data = from(profile, section) ?? (profile !== fallback ? from(fallback, section) : null);
+		if (data) out[section] = data;
+	}
+	return out;
+}
+
+/**
+ * The character (profile) a line plays for a cue: the one it plays in the cue if it's assigned
+ * there, otherwise the one it plays in the next cue that uses it (so the line already shows who
+ * is coming on), otherwise its default profile
+ * @param {Number} ch
+ * @param {Cue | null} cue (null: Line Checks)
+ * @returns {Object | null} profile
+ */
+const character_for = (ch, cue) => {
+	const show = getShow();
+	if (!show) return null;
+	const assigned = (c) => Array.from({length: MAX_SHOW_DCAS}, (_, i) => get_dca_channels(c, i + 1, {raw: true})).some((list) => list.includes(ch));
+	const sorted = [...show.cues].sort((a, b) => (Number(a.number) - Number(b.number)) || (Number(a.point) - Number(b.point)));
+	const start = cue ? sorted.findIndex((c) => Number(c.number) === Number(cue.number) && Number(c.point) === Number(cue.point)) : 0;
+	const from = cue && start === -1 ? [cue] : sorted.slice(Math.max(0, start)).filter((c) => c === cue || !Number(c.skip));
+	const playing = (cue && assigned(cue)) ? cue : from.find((c) => assigned(c));
+	const id = playing ? parse_map(playing.channelProfiles).get(ch) : undefined;
+	return (id !== undefined && show.profiles.find((p) => String(p.id) === id)) || default_profile(show, ch);
+}
+
+/**
+ * Put each show channel's stored settings on the console for this cue's profiles (and actors),
+ * sending only sections that changed since they were last sent
+ * @param {Cue | null} cue (null: Line Checks, default profiles)
+ */
+const apply_channel_settings = (cue) => {
+	const show = getShow();
+	if (!show?.channelSettings?.length) return;
+	const sent = [];
+	for (const ch of get_show_channels()) {
+		// The character it plays now, or next (so their settings are ready before they're on)
+		const profile = character_for(ch, cue);
+		const live = live_channel(ch);
+		const previous = applied_settings.get(live) ?? {};
+		for (const [section, values] of Object.entries(settings_for(ch, profile))) {
+			const key = JSON.stringify(values);
+			if (previous[section] === key) continue;
+			for (const [param, value] of Object.entries(values)) send_param(live, param, value);
+			previous[section] = key;
+			sent.push(`ch ${live} ${section}`);
+		}
+		applied_settings.set(live, previous);
+	}
+	if (sent.length) debugLog('SETTINGS', `Stored settings for ${cue ? `cue ${cue.number}.${cue.point}` : "Line Checks"}: ${sent.join(", ")}`);
+}
+
+/**
+ * Move each show channel's fader by its level offset in this cue (TheatreMix's level offsets):
+ * by the difference from the offset it was last moved by, so the next cue puts it back unless
+ * it has an offset too. Faders below -30 dB aren't moved. With "Store level offsets" off, any
+ * applied offsets are taken back off.
+ * @param {Cue | null} cue (null: Line Checks, no offsets)
+ */
+const apply_level_offsets = (cue) => {
+	const enabled = getShow()?.config?.channelLevels === "1";
+	const offsets = enabled && cue ? parse_map(cue.channelLevels) : new Map();
+	const moved = [];
+
+	for (const ch of get_show_channels()) {
+		const target = (Number(offsets.get(ch)) || 0) / 10;   // stored in tenths of a dB
+		const delta = target - (line_offsets.get(ch) ?? 0);
+		if (Math.abs(delta) < 0.05) continue;
+		line_offsets.set(ch, target);
+
+		const position = line_faders.get(ch) ?? presonusClient.getLevel({type: 'LINE', channel: ch});
+		if (typeof position !== 'number') continue;
+		const level = fader_to_level_exact(position);
+		if (level < OFFSET_FLOOR_DB) continue;
+
+		const next = level_to_fader(Math.min(10, level + delta));
+		line_faders.set(ch, next);
+		presonusClient.setChannelVolumeLinear({type: 'LINE', channel: ch}, next).catch((error) => {
+			debugLog('LEVELS', `Couldn't move channel ${ch}'s fader`, error.message);
+		});
+		moved.push(`ch ${ch} ${delta > 0 ? "+" : ""}${delta.toFixed(1)} dB`);
+	}
+
+	if (moved.length) debugLog('LEVELS', `Level offsets${cue ? ` for cue ${cue.number}.${cue.point}` : " cleared"}: ${moved.join(", ")}`);
 }
 
 /**
@@ -988,7 +1320,7 @@ const write_dca = (cue_object, dca, restore) => {
 			set_fader(selector, restore.fader);
 			for (const ch of channels) channel_levels.set(ch, restore.fader);
 		}
-		if (reassigned) presonusClient.assign_dca(selector, channels, CONTROLLED_LINES);
+		if (reassigned) presonusClient.assign_dca(selector, channels, all_lines());
 
 		const muted = restore.muted ?? false;
 		if (reassigned || read_dca_mute(dca) !== muted) set_dca_mute(dca, muted);
@@ -998,7 +1330,7 @@ const write_dca = (cue_object, dca, restore) => {
 		debugLog('LEVELS', `Cue ${cue_object.number ?? "Line Checks"}${cue_object.point !== undefined ? `.${cue_object.point}` : ""} DCA ${dca} unassigned -> -∞, muted`);
 		set_dca_mute(dca, true);
 		set_fader(selector, 0);
-		presonusClient.assign_dca(selector, channels, CONTROLLED_LINES);
+		presonusClient.assign_dca(selector, channels, all_lines());
 	} else if (reassigned || configured !== null) {
 		// Set the level before the new channels land on it
 		// Console Setup → DCA Recall: "Levels follow people"
@@ -1025,7 +1357,7 @@ const write_dca = (cue_object, dca, restore) => {
 		}
 
 		if (reassigned) {
-			presonusClient.assign_dca(selector, channels, CONTROLLED_LINES);
+			presonusClient.assign_dca(selector, channels, all_lines());
 			set_dca_mute(dca, false);
 		}
 	}
@@ -1113,6 +1445,8 @@ const write_cue = async (_event, {cue_object, back = false}) => {
 	write_line_mutes(cue_channels, 'mute');
 	write_dcas(cue_object, restore);
 	write_line_mutes(cue_channels, 'unmute');
+	apply_level_offsets(cue_object);
+	apply_channel_settings(cue_object);
 	update_dca_colors();
 
 	// Channels in this cue's DCAs show yellow while they have signal
@@ -1126,37 +1460,21 @@ const write_cue = async (_event, {cue_object, back = false}) => {
 }
 
 /**
- * Number of DCAs to write: the console's, up to 8 (the API throws for DCAs it doesn't have)
+ * The DCAs to write: the show's (Show Setup → DCAs to control, up to 24 with "Use all 24 DCAs"),
+ * that the console has
+ * @returns {Number[]}
  */
-const get_dca_count = () => {
+const get_dca_list = () => {
 	const console_dcas = presonusClient?.channelCounts?.DCA;
-	return console_dcas > 0 ? Math.min(8, console_dcas) : 8;
+	return show_dcas(getShow()).filter((d) => !(console_dcas > 0) || d <= console_dcas);
 }
-
-/**
- * Parse a cue's per-channel map, e.g. channelProfiles "3=38,5=40"
- * @param {String} value
- * @returns {Map<number, string>} channel -> value (channels not listed use their default)
- */
-const parse_channel_map = (value) => new Map(String(value ?? "")
-	.split(",")
-	.map((item) => item.split("="))
-	.filter(([ch, v]) => ch && v !== undefined)
-	.map(([ch, v]) => [Number(ch), v.trim()]));
 
 /**
  * The cue after the current one (skipping cues marked skip), in show order. After Line
  * Checks (no current cue) it's the first cue.
  * @returns {Cue | null}
  */
-const get_next_cue = () => {
-	const cues = [...(getShow()?.cues ?? [])].sort((a, b) => (Number(a.number) - Number(b.number)) || (Number(a.point) - Number(b.point)));
-	const start = current_cue === null ? 0
-		: cues.findIndex((c) => Number(c.number) === Number(current_cue.number) && Number(c.point) === Number(current_cue.point)) + 1;
-	if (current_cue !== null && start === 0) return null;   // current cue isn't in the show
-
-	return cues.slice(start).find((c) => !Number(c.skip)) ?? null;
-}
+const get_next_cue = () => next_cue(getShow()?.cues ?? [], current_cue);
 
 /**
  * Darken a color (for dimmed DCAs)
@@ -1174,26 +1492,10 @@ const dim_color = (hex) => hex.match(/../g)
  * @returns {{color: String, reason: String}}
  */
 const dca_color_for = (dca, next) => {
-	const now = current_cue === null ? [] : get_dca_channels(current_cue, dca);
-	const then = next === null ? now : get_dca_channels(next, dca);
-	const key = (channels) => [...channels].sort((a, b) => a - b).join(",");
-
-	let state;
 	// Unassigned now: always black, so it's obvious (whatever the next cue does with it)
-	if (now.length === 0) state = 'off';
-	else if (next === null) state = 'same';   // last cue: nothing coming
-	else if (key(now) !== key(then)) state = now.length > 1 && then.length > 1 ? 'ensemble' : 'change';
-	else {
-		// Same channels: does one of them change position, FX or profile?
-		const changes = (field) => {
-			const a = parse_channel_map(current_cue[field]), b = parse_channel_map(next[field]);
-			return now.some((ch) => (a.get(ch) ?? "") !== (b.get(ch) ?? ""));
-		};
-		state = changes('channelPositions') ? 'position'
-			: changes('channelFX') ? 'fx'
-			: changes('channelProfiles') ? 'profile'
-			: 'same';
-	}
+	const raw = dca_next_state(current_cue, next, dca);
+	// View → Color-Blind DCA Colors
+	const state = getSettings().colorBlindDca ? color_blind_state(raw) : raw;
 
 	let color = DCA_COLORS[state];
 
@@ -1214,7 +1516,7 @@ const dca_color_for = (dca, next) => {
  * @param {Cue | null} next
  */
 const update_dca_color = (dca, next = get_next_cue()) => {
-	if (presonusClient === null || dca > get_dca_count()) return;
+	if (presonusClient === null || !get_dca_list().includes(dca)) return;
 	if (current_cue === null && last_fired?.type !== 'linecheck') return;   // nothing fired yet
 
 	const {color, reason} = dca_color_for(dca, next);
@@ -1234,7 +1536,7 @@ const update_dca_color = (dca, next = get_next_cue()) => {
  */
 const update_dca_colors = () => {
 	const next = get_next_cue();
-	for (let dca = 1; dca <= get_dca_count(); dca++) update_dca_color(dca, next);
+	for (const dca of get_dca_list()) update_dca_color(dca, next);
 }
 
 /**
@@ -1246,7 +1548,7 @@ const write_dcas = (cue_object, restore) => {
 	// Capture where everyone is mixed right now, before any DCA changes
 	remember_channel_levels();
 
-	for (let i = 1; i <= get_dca_count(); i++) {
+	for (const i of get_dca_list()) {
 		try {
 			write_dca(cue_object, i, restore?.get(i));
 		} catch (error) {
@@ -1278,6 +1580,20 @@ const fire_sound_check = async (_event) => {
 	// No DCAs, so every show channel is muted
 	write_line_mutes([], 'mute');
 	write_dcas({});
+	apply_level_offsets(null);
+	apply_channel_settings(null);
+	// Show Setup → Levels: "Force all faders to 0 dB in the Line Checks cue"
+	if (getShow()?.config?.cueZeroResetLevels === "1") {
+		const unity = level_to_fader(0);
+		debugLog('LINECHECK', `Line faders of the show's channels to 0 dB: ch ${get_show_channels().join(", ")}`);
+		for (const ch of get_show_channels()) {
+			line_faders.set(ch, unity);
+			line_offsets.set(ch, 0);
+			presonusClient.setChannelVolumeLinear({type: 'LINE', channel: ch}, unity).catch((error) => {
+				debugLog('LINECHECK', `Couldn't set channel ${ch}'s fader`, error.message);
+			});
+		}
+	}
 	update_dca_colors();
 	setActiveChannels([]);
 }
@@ -1348,13 +1664,28 @@ const set_line_name = (ch, name) => {
 }
 
 /**
+ * Backup channels show their main channel's name with a ~ (TheatreMix)
+ * @param {Function} name_of main channel -> its name
+ */
+const name_backups = (name_of) => {
+	for (const [main, backup] of get_backups()) set_line_name(backup, `~${name_of(main)}`);
+}
+
+/**
  * Initialize Channel Labels - each line shows its default profile's label
  */
 const init_channels = async () => {
 	try {
-		for (let ch_num of CONTROLLED_LINES) {
-			set_line_name(ch_num, get_profile_label(ch_num));
+		// Each line shows the character it plays in this cue, or the one it plays next
+		const label = (ch) => {
+			const profile = character_for(ch, current_cue);
+			return profile ? (profile.label || profile.name || "") : get_profile_label(ch);
+		};
+		// The show's controlled lines (Show Setup), any of the 32
+		for (let ch_num of get_show_channels()) {
+			set_line_name(ch_num, label(ch_num));
 		}
+		name_backups(label);
 	} catch (error) {
 		console.log("[Sound.js] Error: ", error);
 	}
@@ -1374,11 +1705,12 @@ const set_soundcheck_labels = async () => {
 	const use_actor_names = getShow()?.config?.cueZeroActorLabels !== "0";
 
 	try {
-		for (let ch of CONTROLLED_LINES) {
+		for (let ch of get_show_channels()) {
 			const actor = use_actor_names ? get_actor(ch) : null;
 
 			set_line_name(ch, actor?.name ?? get_profile_label(ch));
 		}
+		name_backups((ch) => (use_actor_names ? get_actor(ch)?.name : null) ?? get_profile_label(ch));
 	} catch (error) {
 		console.log("[SOUND:fire_sound_check]: Failed to set line check labels", error);
 	}
@@ -1393,4 +1725,5 @@ const sync_channel_monitor = () => {
 	update_dca_colors();
 }
 
-export {discover, connect, auto_connect, show_opened, disconnect, write_cue, fire_sound_check, reset_console_state, sync_channel_monitor, get_console_status, consoleEvents};
+export {discover, connect, auto_connect, show_opened, disconnect, write_cue, fire_sound_check, reset_console_state, sync_channel_monitor, get_console_status, consoleEvents,
+	get_backup_status, toggle_backup, assign_spare, capture_channel_settings};

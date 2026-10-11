@@ -37,6 +37,15 @@ contextBridge.exposeInMainWorld('presonus', {
 
   	fire_sound_check: () =>
 	  	ipcRenderer.invoke('presonus:fire_sound_check', {}),
+
+	// Store from console: {ok: true, settings: {section: {param: value}}} or {ok: false, error}
+	captureSettings: (channel, sections) => ipcRenderer.invoke('presonus:capture_settings', {channel, sections}),
+
+	// Backup channels: {pairs: [{main, backup, label, switched, spare}], spare, spareFor}
+	getBackups: () => ipcRenderer.invoke('presonus:get_backups'),
+	toggleBackup: (main) => ipcRenderer.invoke('presonus:toggle_backup', main),
+	assignSpare: (main) => ipcRenderer.invoke('presonus:assign_spare', main),
+	onBackups: (callback) => subscribe('backup-status', callback),
 });
 
 contextBridge.exposeInMainWorld('showApi', {
@@ -65,11 +74,20 @@ contextBridge.exposeInMainWorld('showApi', {
 		ipcRenderer.invoke('show:can_save'),
 	onCanSave: (callback) => subscribe('show-can-save', callback),
 
-	// Return the updated level map, or null if there was nothing to undo / redo
-	undoDcaLevel: () =>
-		ipcRenderer.invoke('show:undo_dca_level'),
-	redoDcaLevel: () =>
-		ipcRenderer.invoke('show:redo_dca_level'),
+	// {canUndo, canRedo}, for the toolbar's Undo / Redo
+	getEditState: () => ipcRenderer.invoke('show:edit_state'),
+	onEditState: (callback) => subscribe('show-edit-state', callback),
+
+	// Apply edits (see utils/show_edits.js) as one undo step:
+	// {ok: true, show, results} or {ok: false, error}
+	edit: (ops) =>
+		ipcRenderer.invoke('show:edit', ops),
+
+	// Return the show, or null if there was nothing to undo / redo
+	undo: () =>
+		ipcRenderer.invoke('show:undo'),
+	redo: () =>
+		ipcRenderer.invoke('show:redo'),
 });
 
 /**
@@ -101,6 +119,24 @@ contextBridge.exposeInMainWorld('consoleSetupApi', {
 	setRecall: (changes) => ipcRenderer.invoke('app:set_recall_settings', changes),
 });
 
+contextBridge.exposeInMainWorld('cueInfoApi', {
+	// {current: {key, number, name, colour}, next: {...} | null, marked}
+	get: () => ipcRenderer.invoke('cue-info:get'),
+	onChange: (callback) => subscribe('active-cue', callback),
+
+	// Mark a cue (key, or null for Line Checks) with a note; returns every mark
+	mark: (key, note) => ipcRenderer.invoke('marks:mark', {key, note}),
+	getMarks: () => ipcRenderer.invoke('marks:get'),
+});
+
+contextBridge.exposeInMainWorld('editorApi', {
+	// {kind, lineChecks, paste, pasteDca}: what's selected in the cue list (Edit menu items)
+	setSelection: (selection) => ipcRenderer.invoke('editor:set_selection', selection),
+
+	// Cue highlight color menu at the mouse: resolves to the color index, or null
+	colorMenu: (current) => ipcRenderer.invoke('editor:color_menu', current),
+});
+
 contextBridge.exposeInMainWorld('qlabApi', {
 	// Start a QLab cue now (Test QLab Recall); returns {ok, error?}
 	recall: (cueNumber) => ipcRenderer.invoke('qlab:recall', cueNumber),
@@ -120,6 +156,7 @@ contextBridge.exposeInMainWorld('menuApi', {
 	// {rowSize: 'small' | 'medium' | 'large', lockEditing: boolean}
 	getViewSettings: () => ipcRenderer.invoke('app:get_view_settings'),
 	setLockEditing: (locked) => ipcRenderer.invoke('app:set_lock_editing', locked),
+	setShowPositions: (on) => ipcRenderer.invoke('app:set_show_positions', on),
 	onViewSettings: (callback) => subscribe('view-settings', callback),
 });
 

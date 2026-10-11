@@ -10,9 +10,11 @@ import path from 'node:path';
 import { getMainWindow } from './windowManager.js';
 import { handle_open_file } from './fileManager.js';
 import {
-	showEvents, getShowState, closeShow,
+	showEvents, getShow, getShowState, closeShow, newShow, confirmDiscardChanges,
 	saveShow, saveShowAs, mergeTmix
 } from './showManager.js';
+import { show_opened, sync_channel_monitor } from './sound.js';
+import { openActiveCueWindow, exportNotes, clearMarks } from './cueInfo.js';
 import { getSettings, updateSettings, removeRecentFile } from './settings.js';
 import { getConsoleButtonReport, getLogAllConsoleMessages, setLogAllConsoleMessages } from './consoleButtons.js';
 import { getDebugLogPath } from './debugLog.js';
@@ -20,6 +22,14 @@ import { getDebugLogPath } from './debugLog.js';
 const isMac = process.platform === 'darwin';
 
 const README_URL = 'https://github.com/MaxMessWithTech/TheatreMixClone#readme';
+
+/**
+ * What's selected in the cue list (sent by the renderer), for the Edit menu's enabled items
+ * kind: the selected cells' column ('cue' | 'text' | 'qlab' | 'dca'), or null for nothing;
+ * lineChecks: the Line Checks row is selected; paste / pasteDca: something to paste
+ * (pasteDca: DCA cells, so Paste Merge / Swap work)
+ */
+let editorSelection = {kind: null, lineChecks: false, paste: false, pasteDca: false};
 
 /**
  * Send a menu command to the renderer (cue list actions live there)
@@ -38,8 +48,8 @@ const sendMenuAction = (action) => {
 const sendViewSettings = () => {
 	const window = getMainWindow();
 	if (window && !window.isDestroyed()) {
-		const {rowSize, lockEditing} = getSettings();
-		window.webContents.send('view-settings', {rowSize, lockEditing});
+		const {rowSize, lockEditing, showPositions, colorBlindDca} = getSettings();
+		window.webContents.send('view-settings', {rowSize, lockEditing, showPositions, colorBlindDca});
 	}
 }
 
@@ -73,8 +83,23 @@ const handle_open_recent = async (filePath) => {
 
 const handle_close_show = async () => {
 	if (await closeShow()) {
+		clearMarks();
 		getMainWindow()?.webContents.send('show-updated', null);
 	}
+}
+
+/**
+ * File → New Show: a blank show, then Show Setup to name the channels (like TheatreMix)
+ */
+const handle_new_show = async () => {
+	if (!(await confirmDiscardChanges())) return;
+	// The designer carries over from the show that was open
+	const show = newShow(getShow()?.config?.designer ?? "");
+	clearMarks();
+	getMainWindow()?.webContents.send('show-updated', show);
+	show_opened();
+	// After the window has the new show (with no show before, it would ignore the action)
+	setTimeout(() => sendMenuAction('show-setup'), 150);
 }
 
 const handle_merge_tmix = async () => {
@@ -139,10 +164,17 @@ const handle_row_size = (rowSize) => {
  */
 const buildTemplate = () => {
 	const {hasShow, isTmixp, qLabEnabled, canSave} = getShowState();
-	const {recentFiles, rowSize, lockEditing} = getSettings();
+	const {recentFiles, rowSize, lockEditing, showPositions, colorBlindDca} = getSettings();
 
 	// Feature not in this app yet
 	const notImplemented = {enabled: false};
+
+	// Editing commands: need a show, editing unlocked and a suitable cell selected
+	const {kind, lineChecks, paste, pasteDca} = editorSelection;
+	const editing = hasShow && !lockEditing;
+	const onCue = editing && kind !== null && !lineChecks;
+	const cellEdit = onCue && kind !== 'cue';
+	const edit = (action, enabled) => ({enabled: !!enabled, click: () => sendMenuAction(action)});
 
 	return [
 		// macOS app menu (TheatreMix's About / Quit live here on Mac)
@@ -164,7 +196,7 @@ const buildTemplate = () => {
 		{
 			label: '&File',
 			submenu: [
-				{ label: 'New Show', accelerator: 'CmdOrCtrl+N', ...notImplemented },
+				{ label: 'New Show', accelerator: 'CmdOrCtrl+N', click: handle_new_show },
 				{ label: 'Open Show...', accelerator: 'CmdOrCtrl+O', click: handle_open_show },
 				{
 					label: 'Open Recent',
@@ -181,13 +213,13 @@ const buildTemplate = () => {
 				{ type: 'separator' },
 				{ label: 'Save Show', accelerator: 'CmdOrCtrl+S', enabled: canSave, click: () => saveShow() },
 				{ label: 'Save As...', accelerator: 'CmdOrCtrl+Shift+S', enabled: hasShow, click: () => saveShowAs() },
-				{ label: 'Export Notes...', ...notImplemented },
+				{ label: 'Export Notes...', enabled: hasShow, click: () => exportNotes() },
 				{ label: 'Merge Cues from .tmix...', enabled: isTmixp, click: handle_merge_tmix },
 				{ type: 'separator' },
-				{ label: 'Show Setup', ...notImplemented },
-				{ label: 'Ensemble Setup', ...notImplemented },
-				{ label: 'Position Setup', ...notImplemented },
-				{ label: 'Actor Setup', ...notImplemented },
+				{ label: 'Show Setup', enabled: hasShow, click: () => sendMenuAction('show-setup') },
+				{ label: 'Ensemble Setup', enabled: hasShow, click: () => sendMenuAction('ensemble-setup') },
+				{ label: 'Position Setup', enabled: hasShow, click: () => sendMenuAction('position-setup') },
+				{ label: 'Actor Setup', enabled: hasShow, click: () => sendMenuAction('actor-setup') },
 				{ type: 'separator' },
 				// Unlike TheatreMix this works without a show, so a console can be tested on its own
 				{ label: 'Console Setup', accelerator: 'CmdOrCtrl+K', click: () => sendMenuAction('console-setup') },
@@ -201,29 +233,30 @@ const buildTemplate = () => {
 		{
 			label: '&Edit',
 			submenu: [
-				// Cut / Copy / Paste act on text fields (cue editing isn't supported yet)
-				{ label: 'Cut', role: 'cut' },
-				{ label: 'Copy', role: 'copy' },
-				{ label: 'Paste', role: 'paste' },
-				{ label: 'Paste Merge', accelerator: 'CmdOrCtrl+Shift+V', ...notImplemented },
-				{ label: 'Paste Swap', accelerator: 'CmdOrCtrl+Alt+V', ...notImplemented },
-				{ label: 'Fill Down', accelerator: 'CmdOrCtrl+D', ...notImplemented },
+				// Cut / Copy / Paste act on a text field being typed in, otherwise on the selected
+				// cells (handled in the renderer, so they're always enabled for text fields)
+				{ label: 'Cut', accelerator: 'CmdOrCtrl+X', click: () => sendMenuAction('cut') },
+				{ label: 'Copy', accelerator: 'CmdOrCtrl+C', click: () => sendMenuAction('copy') },
+				{ label: 'Paste', accelerator: 'CmdOrCtrl+V', click: () => sendMenuAction('paste') },
+				{ label: 'Paste Merge', accelerator: 'CmdOrCtrl+Shift+V', ...edit('paste-merge', cellEdit && kind === 'dca' && pasteDca) },
+				{ label: 'Paste Swap', accelerator: 'CmdOrCtrl+Alt+V', ...edit('paste-swap', cellEdit && kind === 'dca' && pasteDca) },
+				{ label: 'Fill Down', accelerator: 'CmdOrCtrl+D', ...edit('fill-down', cellEdit) },
 				{ type: 'separator' },
-				// Undo text edits when typing, otherwise DCA level edits (handled in the renderer)
+				// Undo text edits when typing, otherwise show edits (handled in the renderer)
 				{ label: 'Undo', accelerator: 'CmdOrCtrl+Z', click: () => sendMenuAction('undo') },
 				{ label: 'Redo', accelerator: 'CmdOrCtrl+Shift+Z', click: () => sendMenuAction('redo') },
 				{ type: 'separator' },
-				{ label: 'Insert Cue', accelerator: 'CmdOrCtrl+M', ...notImplemented },
-				{ label: 'Clone Cue', accelerator: 'CmdOrCtrl+Alt+C', ...notImplemented },
-				{ label: 'Clone Cue to end', accelerator: 'CmdOrCtrl+Alt+Shift+C', ...notImplemented },
-				// TheatreMix uses ⌘⌫ / ⌫ here; not registered so they keep working in text fields
-				{ label: 'Delete Cue', ...notImplemented },
+				{ label: 'Insert Cue', accelerator: 'CmdOrCtrl+M', ...edit('insert-cue', editing && kind !== null) },
+				{ label: 'Clone Cue', accelerator: 'CmdOrCtrl+Alt+C', ...edit('clone-cue', onCue) },
+				{ label: 'Clone Cue to end', accelerator: 'CmdOrCtrl+Alt+Shift+C', ...edit('clone-cue-end', onCue) },
+				// TheatreMix uses ⌘⌫ here; the cue list handles it, so it keeps working in text fields
+				{ label: 'Delete Cue', ...edit('delete-cue', onCue) },
 				{ type: 'separator' },
-				{ label: 'Skip Cue', accelerator: 'CmdOrCtrl+Alt+K', ...notImplemented },
-				{ label: 'Renumber Cues...', ...notImplemented },
+				{ label: 'Skip Cue', accelerator: 'CmdOrCtrl+Alt+K', ...edit('skip-cue', onCue) },
+				{ label: 'Renumber Cues...', ...edit('renumber', onCue) },
 				{ type: 'separator' },
-				{ label: 'Assign...', accelerator: 'CmdOrCtrl+E', ...notImplemented },
-				{ label: 'Clear Assignment', ...notImplemented },
+				{ label: 'Assign...', accelerator: 'CmdOrCtrl+E', ...edit('assign', onCue && kind === 'dca') },
+				{ label: 'Clear Assignment', ...edit('clear-assignment', onCue && kind === 'dca') },
 			]
 		},
 
@@ -233,7 +266,10 @@ const buildTemplate = () => {
 				{ label: 'Lock Editing', type: 'checkbox', accelerator: 'CmdOrCtrl+L', checked: lockEditing, enabled: hasShow, click: handle_lock_editing },
 				{ type: 'separator' },
 				{ label: 'FX', accelerator: 'CmdOrCtrl+F', ...notImplemented },
-				{ label: 'Positions', accelerator: 'CmdOrCtrl+T', ...notImplemented },
+				{ label: 'Positions', type: 'checkbox', accelerator: 'CmdOrCtrl+T', checked: showPositions, enabled: hasShow,
+					click: (item) => { updateSettings({showPositions: item.checked}); sendViewSettings(); } },
+				{ label: 'Color-Blind DCA Colors', type: 'checkbox', checked: colorBlindDca,
+					click: (item) => { updateSettings({colorBlindDca: item.checked}); sendViewSettings(); sync_channel_monitor(); } },
 				{
 					label: 'Row Size',
 					submenu: ['small', 'medium', 'large'].map((size) => ({
@@ -245,8 +281,8 @@ const buildTemplate = () => {
 					}))
 				},
 				{ type: 'separator' },
-				{ label: 'Channel Utilisation', accelerator: 'CmdOrCtrl+U', ...notImplemented },
-				{ label: 'Active Cue Info', accelerator: 'CmdOrCtrl+I', ...notImplemented },
+				{ label: 'Channel Utilisation', accelerator: 'CmdOrCtrl+U', enabled: hasShow, click: () => sendMenuAction('channel-utilisation') },
+				{ label: 'Active Cue Info', accelerator: 'CmdOrCtrl+I', click: () => openActiveCueWindow() },
 
 				// Developer tools while running from source
 				...(app.isPackaged ? [] : [
@@ -271,8 +307,10 @@ const buildTemplate = () => {
 				{ label: 'Jump...', accelerator: 'CmdOrCtrl+J', enabled: hasShow, click: () => sendMenuAction('jump') },
 				{ label: 'Jump to Selected Cue', accelerator: 'CmdOrCtrl+Alt+J', enabled: hasShow, click: () => sendMenuAction('jump-selected') },
 				{ type: 'separator' },
-				{ label: 'Mark Selected Cue...', accelerator: 'CmdOrCtrl+R', ...notImplemented },
-				{ label: 'Mark Current Cue...', accelerator: 'CmdOrCtrl+Shift+R', ...notImplemented },
+				{ label: 'Store Channel Settings from Console', accelerator: 'CmdOrCtrl+Alt+S', enabled: hasShow, click: () => sendMenuAction('store-settings') },
+				{ type: 'separator' },
+				{ label: 'Mark Selected Cue...', accelerator: 'CmdOrCtrl+R', enabled: hasShow, click: () => sendMenuAction('mark-selected') },
+				{ label: 'Mark Current Cue...', accelerator: 'CmdOrCtrl+Shift+R', enabled: hasShow, click: () => sendMenuAction('mark-current') },
 				{ type: 'separator' },
 				// Starts the selected cue's QLab cue without firing the cue (works without a console)
 				{ label: 'Test QLab Recall', accelerator: 'CmdOrCtrl+Alt+T', enabled: hasShow && qLabEnabled, click: () => sendMenuAction('test-qlab') },
@@ -284,7 +322,7 @@ const buildTemplate = () => {
 			role: 'help',
 			submenu: [
 				{ label: 'Quick Start', click: () => shell.openExternal(README_URL) },
-				{ label: 'Feature Guide', ...notImplemented },
+				{ label: 'Feature Guide', click: () => shell.openExternal(`${README_URL.replace('#readme', '')}#editing-shows`) },
 				{ type: 'separator' },
 				// Troubleshooting the console's Go / Back buttons
 				{ label: 'Console Buttons...', click: handle_console_buttons },
@@ -331,4 +369,15 @@ const setLockEditing = (locked) => {
 	updateMenu();
 }
 
-export { initMenu, updateMenu, sendViewSettings, sendMenuAction, setLockEditing };
+/**
+ * The cue list's selection changed (enables the Edit menu's items)
+ * @param {{kind: String | null, lineChecks: boolean, paste: boolean, pasteDca: boolean}} selection
+ */
+const setEditorSelection = (selection) => {
+	const next = {kind: null, lineChecks: false, paste: false, pasteDca: false, ...selection};
+	if (JSON.stringify(next) === JSON.stringify(editorSelection)) return;
+	editorSelection = next;
+	updateMenu();
+}
+
+export { initMenu, updateMenu, sendViewSettings, sendMenuAction, setLockEditing, setEditorSelection, handle_new_show as handleNewShow };

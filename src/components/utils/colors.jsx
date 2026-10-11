@@ -10,6 +10,17 @@ const TEXT_COLOR = "#ffffff";
 // The active cue keeps its own color and gets this accent: a bar on its left edge and a light tint
 const ACTIVE_CUE_ACCENT = "#4ade80";
 const ACTIVE_CUE_TINT = "rgba(74, 222, 128, 0.18)";
+
+// DCA cells: what happens to the DCA in the next cue (TheatreMix's color coding, utils/dca_state.js),
+// [several channels, one channel]: like TheatreMix, ensembles are brighter. "change" and "off"
+// keep the cell's normal background.
+const DCA_STATE_COLORS = {
+    same: [{backgroundColor: "#00c400"}, {backgroundColor: "#088a08"}],
+    position: [{backgroundColor: "#00b8b8"}, {backgroundColor: "#077c7c"}],
+    fx: [{backgroundColor: "#ff8c00"}, {backgroundColor: "#a85c00"}],
+    profile: [{backgroundColor: "#d8c800", color: "#000"}, {backgroundColor: "#8f8500"}],
+    ensemble: [{backgroundColor: "#c800c8"}, {backgroundColor: "#880088"}],
+};
 const BORDER_COLOR = "#111111";
 const SELECTED_COLOR = "#005BD9";
 
@@ -37,7 +48,7 @@ export {
     DEFAULT_ROW_COLOR, RED_HIGHLIGHT_COLOR,
     YELLOW_HIGHLIGHT_COLOR, GREEN_HIGHLIGHT_COLOR,
     BLUE_HIGHLIGHT_COLOR, PURPLE_HIGHLIGHT_COLOR, 
-    TEXT_COLOR, ACTIVE_CUE_ACCENT, ACTIVE_CUE_TINT, BORDER_COLOR,
+    TEXT_COLOR, ACTIVE_CUE_ACCENT, ACTIVE_CUE_TINT, DCA_STATE_COLORS, BORDER_COLOR,
     SELECTED_COLOR,
     get_cue_color
 }
