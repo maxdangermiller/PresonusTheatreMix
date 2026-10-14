@@ -8,6 +8,7 @@ import {
 	MAX_DCAS, default_profile, profile_flags, with_profile_flags, SETTING_SECTIONS, show_dcas,
 } from '../utils/show_edits.js';
 import AssignDialog from './AssignDialog.jsx';
+import PreferencesDialog from './PreferencesDialog.jsx';
 import RenumberDialog from './RenumberDialog.jsx';
 import ShowSetupDialog from './ShowSetupDialog.jsx';
 import EnsembleSetupDialog from './EnsembleSetupDialog.jsx';
@@ -58,8 +59,21 @@ const SCROLL_BOX_STYLE = {
 const CUE_COLUMN_WIDTH = 72;
 const TEXT_COLUMN_WIDTH = '20%';
 // The table's minimum width: the cue / text / QLab columns plus ~96px per DCA
-const TABLE_FIXED_WIDTH = 282;
+const TEXT_MIN_WIDTH = 210;
 const DCA_MIN_WIDTH = 96;
+// Dragging a header's edge resizes its column (View settings keep the widths)
+const MIN_COLUMN_WIDTH = 30;
+
+// The grab area on a header's right edge
+const RESIZE_HANDLE_STYLE = {
+	position: 'absolute',
+	top: 0,
+	right: 0,
+	width: 7,
+	height: '100%',
+	cursor: 'col-resize',
+	zIndex: 2,
+}
 
 const TABLE_STYLE = {
 	width: '100%',
@@ -244,10 +258,14 @@ const Editor = ({showData, setShowData}) => {
 	const toastTimer = useRef(null);
 
 	// View menu preferences
-	const [view, set_view] = useState({rowSize: 'medium', lockEditing: false, showPositions: false, colorBlindDca: false});
+	const [view, set_view] = useState({rowSize: 'medium', fontSize: null, columnWidths: {}, lockEditing: false, showPositions: false, colorBlindDca: false});
+	const [prefs_open, set_prefs_open] = useState(false);
+	// Column widths while one is being dragged (saved when the drag ends)
+	const [drag_widths, set_drag_widths] = useState(null);
+	const column_widths = drag_widths ?? view.columnWidths ?? {};
 
 	const dialog_open = assign_dialog !== null || renumber_dialog !== null || jump_dialog_open || setup_dialog !== null
-		|| utilisation_open || mark_dialog !== null;
+		|| utilisation_open || mark_dialog !== null || prefs_open;
 	const can_edit = showData !== null && !view.lockEditing;
 
 	// TheatreMix: Show Setup → QLab → "Recall QLab cues" adds a QLab column
@@ -266,7 +284,74 @@ const Editor = ({showData, setShowData}) => {
 	 * Apply the current row size to a cell style
 	 * @param {Object} style
 	 */
-	const sized = (style) => ({...style, fontSize: ROW_FONT_SIZES[view.rowSize] ?? ROW_FONT_SIZES.medium});
+	const font_size = view.fontSize ?? ROW_FONT_SIZES[view.rowSize] ?? ROW_FONT_SIZES.medium;
+	const sized = (style) => ({...style, fontSize: font_size});
+
+	/**
+	 * Drag a header's right edge to resize its column
+	 * @param {MouseEvent} event
+	 * @param {String} col
+	 */
+	const startResize = (event, col) => {
+		event.preventDefault();
+		event.stopPropagation();
+		const th = event.currentTarget.parentElement;
+		const start_x = event.clientX;
+		const start_width = th.getBoundingClientRect().width;
+		// Lock every column at the width it has now, so only the dragged one changes (the Text
+		// column is a percentage of the table, and the DCAs share what's left, so they'd move too)
+		let widths = Object.fromEntries([...th.parentElement.children].map((cell, i) => [columns[i], Math.round(cell.getBoundingClientRect().width)]));
+		const move = (e) => {
+			widths = {...widths, [col]: Math.max(MIN_COLUMN_WIDTH, Math.round(start_width + e.clientX - start_x))};
+			set_drag_widths(widths);
+		};
+		const up = () => {
+			window.removeEventListener('mousemove', move);
+			window.removeEventListener('mouseup', up);
+			document.body.style.cursor = '';
+			set_view((prev) => ({...prev, columnWidths: widths}));
+			set_drag_widths(null);
+			window.menuApi.updateViewSettings({columnWidths: widths});
+		};
+		document.body.style.cursor = 'col-resize';
+		window.addEventListener('mousemove', move);
+		window.addEventListener('mouseup', up);
+	}
+
+	/** Double-click a header's edge: back to its default width (the others keep theirs) */
+	const resetColumn = (event, col) => {
+		event.stopPropagation();
+		const {[col]: _, ...widths} = view.columnWidths ?? {};
+		set_view((prev) => ({...prev, columnWidths: widths}));
+		window.menuApi.updateViewSettings({columnWidths: widths});
+	}
+
+	/**
+	 * A column header with a resize handle on its right edge
+	 * @param {String} col
+	 * @param {String} text
+	 */
+	const headerCell = (col, text) => (
+		<th key={col} style={HEADER_ITEM_STYLE}>
+			{text}
+			<div
+				style={RESIZE_HANDLE_STYLE}
+				onMouseDown={(e) => startResize(e, col)}
+				onDoubleClick={(e) => resetColumn(e, col)}
+				title="Drag to resize; double-click to reset"
+				data-resize={col}
+			/>
+		</th>
+	);
+
+	// Column widths. Never resized: cue / QLab fixed, text 20%, the DCAs share the rest, filling the
+	// window. Once a column has been dragged, every column has its own width in px and the table is
+	// exactly as wide as they add up to (a column without one, e.g. a DCA added later, gets its minimum).
+	const resized = Object.keys(column_widths).length > 0;
+	const min_width = (col) => ({cue: CUE_COLUMN_WIDTH, text: TEXT_MIN_WIDTH, qlab: QLAB_COLUMN_WIDTH}[col] ?? DCA_MIN_WIDTH);
+	const width_of = (col) => column_widths[col] ?? (resized ? min_width(col) : {cue: CUE_COLUMN_WIDTH, text: TEXT_COLUMN_WIDTH, qlab: QLAB_COLUMN_WIDTH}[col]);
+	const table_width = columns.reduce((sum, col) => sum + (column_widths[col] ?? min_width(col)), 0);
+	const table_size = resized ? {width: table_width, minWidth: 0} : {minWidth: table_width};
 
 	/** A short message over the cue list: kind 'error' (the default, an edit that couldn't be done) or 'info' */
 	const flash = (message, kind = 'error') => {
@@ -555,6 +640,23 @@ const Editor = ({showData, setShowData}) => {
 			return;
 		}
 
+		// No duplicate DCAs: refuse to paste a DCA into a cue that already has those exact channels on
+		// another DCA (one being cut from that cue is fine: it's moving)
+		if (clipboard.kind === 'dca' && !merge) {
+			const same = (a, b) => a.length > 0 && a.length === b.length && a.every((ch) => b.includes(ch));
+			for (const t of fits) {
+				const cue = cues[t.row];
+				const dca = dca_of(t.col);
+				const moving = clipboard.cut ? clipboard.cols.filter(() => clipboard.keys.includes(cue_key(cue))).map(dca_of) : [];
+				const dupe = show_dcas(showData).find((d) => d !== dca && !moving.includes(d)
+					&& same(parse_channels(cue[dca_field(d, 'Channels')]), t.value.channels));
+				if (dupe !== undefined) {
+					flash(`Cue ${format_cue_number(cue.number, cue.point)} already has those channels on DCA ${dupe}`);
+					return;
+				}
+			}
+		}
+
 		// A cut clears its cells first (except ones being pasted over), then the paste goes in
 		const ops = [];
 		if (clipboard.cut) {
@@ -664,10 +766,12 @@ const Editor = ({showData, setShowData}) => {
 		set_assign_dialog({key: cue_key(cues[row]), dca});
 	}
 
-	const saveAssign = async (values) => {
+	const saveAssign = async ({offsetsOn, ...values}) => {
 		const {key, dca} = assign_dialog;
 		set_assign_dialog(null);
-		await runEdit([{op: 'set_dca', cue: key, dca, ...values}]);
+		const ops = [{op: 'set_dca', cue: key, dca, ...values}];
+		if (offsetsOn !== (showData.config?.channelLevels === "1")) ops.push({op: 'set_config', values: {channelLevels: offsetsOn ? "1" : "0"}});
+		await runEdit(ops);
 	}
 
 	/** Right-click a cue number / text: highlight color */
@@ -848,6 +952,10 @@ const Editor = ({showData, setShowData}) => {
 				break;
 			case 'store-settings':
 				storeSettings();
+				break;
+			case 'preferences':
+				set_cell_edit(null);
+				set_prefs_open(true);
 				break;
 			case 'channel-utilisation':
 				set_cell_edit(null);
@@ -1167,21 +1275,18 @@ const Editor = ({showData, setShowData}) => {
 	return <div style={CONTAINER_STYLE}>
 		<div style={{flex: 1, minWidth: 0, display: "flex", flexDirection: "column"}}>
 		<div style={SCROLL_BOX_STYLE}>
-		<table style={{...TABLE_STYLE, minWidth: TABLE_FIXED_WIDTH + (show_qlab ? QLAB_COLUMN_WIDTH : 0) + DCA_NUMBERS.length * DCA_MIN_WIDTH}}>
+		<table style={{...TABLE_STYLE, ...table_size}}>
 			<colgroup>
-				<col style={{width: CUE_COLUMN_WIDTH}}/>
-				<col style={{width: TEXT_COLUMN_WIDTH}}/>
-				{show_qlab && <col style={{width: QLAB_COLUMN_WIDTH}}/>}
-				{DCA_NUMBERS.map((dca) => <col key={dca}/>)}
+				{columns.map((col) => <col key={col} style={{width: width_of(col)}}/>)}
 			</colgroup>
 
 			{/* Table Header */}
 			<thead>
 			<tr>
-				<th style={HEADER_ITEM_STYLE}>Cue</th>
-				<th style={HEADER_ITEM_STYLE}>Text</th>
-				{show_qlab && <th style={HEADER_ITEM_STYLE}>QLab</th>}
-				{DCA_NUMBERS.map((dca) => <th key={dca} style={HEADER_ITEM_STYLE}>DCA {dca}</th>)}
+				{headerCell('cue', "Cue")}
+				{headerCell('text', "Text")}
+				{show_qlab && headerCell('qlab', "QLab")}
+				{DCA_NUMBERS.map((dca) => headerCell(`dca${dca}`, `DCA ${dca}`))}
 			</tr>
 			</thead>
 
@@ -1259,6 +1364,22 @@ const Editor = ({showData, setShowData}) => {
 			onSave: async (ops) => { if (await runEdit(ops, {setup: true})) set_setup_dialog(null); },
 			onCancel: () => set_setup_dialog(null),
 		})}
+
+		{prefs_open && (
+			<PreferencesDialog
+				fontSize={font_size}
+				hasColumnWidths={Object.keys(view.columnWidths ?? {}).length > 0}
+				onSave={({fontSize}) => {
+					set_prefs_open(false);
+					if (fontSize !== font_size) window.menuApi.updateViewSettings({fontSize});
+				}}
+				onResetColumns={() => {
+					set_view((prev) => ({...prev, columnWidths: {}}));
+					window.menuApi.updateViewSettings({columnWidths: {}});
+				}}
+				onCancel={() => set_prefs_open(false)}
+			/>
+		)}
 
 		{utilisation_open && (
 			<ChannelUtilisation

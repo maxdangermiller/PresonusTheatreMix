@@ -1,6 +1,9 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import dgram from 'node:dgram';
 import os from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
+import zlib from 'node:zlib';
 import { EventEmitter } from 'node:events';
 
 import { Client } from '@featherbear/presonus-studiolive-api';
@@ -12,6 +15,7 @@ import {attachChannelMonitor, detachChannelMonitor, resetChannelMonitor, setMoni
 import {get_dca_level, fader_to_level, fader_to_level_exact, level_to_fader, format_dca_level, NEW_DCA_LEVEL} from '../utils/dca_levels.js';
 import {next_cue, dca_next_state, color_blind_state} from '../utils/dca_state.js';
 import {parse_map, default_profile, profile_flags, SETTING_SECTIONS, show_dcas} from '../utils/show_edits.js';
+import {format_cue_number} from '../utils/cue_number.js';
 
 import {convert_ip_to_octets, is_ip_valid} from '../utils/ip_tools';
 import Actor from '../models/Actor.js';
@@ -148,15 +152,20 @@ let dca_mutes = new Map();
 let line_mutes = new Map();
 
 /**
- * Level offsets (TheatreMix: Show Setup → "Store level offsets", Assign → Offset): the offset
- * each line's fader has been moved by (dB), and line fader positions (0-100) since connecting
- * @type {Map<number, number>}
+ * Line faders: a line coming onto a DCA (from being on none) starts at 0 dB plus its level
+ * offset (Assign → Offset, when Show Setup → "Store level offsets" is on). While it stays on a
+ * DCA, even moving between DCAs, the operator's trim is kept; an offset change moves the fader
+ * by the difference.
+ * line_placed: main channel -> the line carrying it and the offset applied, while it's on a DCA.
+ * line_faders: line fader positions (0-100) since connecting.
+ * @type {Map<number, {live: Number, offset: Number}>}
  */
-let line_offsets = new Map();
+let line_placed = new Map();
 let line_faders = new Map();
 
-// TheatreMix doesn't move faders that are below this (a channel that's been pulled out)
-const OFFSET_FLOOR_DB = -30;
+// A backup takes over its main's fader level within this range, else 0 dB plus the offset
+const COPY_LEVEL_MIN_DB = -30;
+const COPY_LEVEL_MAX_DB = 6;
 
 /**
  * Backup channels (TheatreMix: Show Setup → Backup, "backupChannels" = "backup=main", and a
@@ -531,7 +540,7 @@ const do_connect = async (host, port, name) => {
 	dca_faders = new Map();
 	dca_mutes = new Map();
 	line_mutes = new Map();
-	line_offsets = new Map();
+	line_placed = new Map();
 	line_faders = new Map();
 	param_values = new Map();
 	applied_settings = new Map();
@@ -633,6 +642,7 @@ const do_connect = async (host, port, name) => {
 			dca_mutes = new Map();
 			line_mutes = new Map();
 			line_faders = new Map();
+			line_placed = new Map();
 			dca_colors = new Map();
 			resync_after_reconnect(client);
 
@@ -887,6 +897,7 @@ const show_opened = () => {
  * Called on connect and show load.
  */
 const reset_console_state = () => {
+	cue_display = new Map();
 	applied_dcas = {};
 	applied_settings = new Map();
 	line_names = {};
@@ -980,7 +991,9 @@ const backups_changed = () => {
  */
 const toggle_backup = (main) => {
 	if (!get_backups().has(main)) return get_backup_status();
+	const from = live_channel(main);
 	if (switched.has(main)) switched.delete(main); else switched.add(main);
+	copy_line_level(main, from, live_channel(main));
 	debugLog('BACKUP', `Channel ${main} -> ${switched.has(main) ? `backup channel ${get_backups().get(main)}` : "back to its own channel"}`);
 	backups_changed();
 	return get_backup_status();
@@ -991,9 +1004,12 @@ const toggle_backup = (main) => {
  * @param {Number | null} main
  */
 const assign_spare = (main) => {
+	// The channel the spare stood in for goes back to its own line, and the new one moves onto the spare
+	const before = [spare_for, main].filter((ch) => ch !== null).map((ch) => [ch, live_channel(ch)]);
 	if (spare_for !== null) switched.delete(spare_for);
 	spare_for = main;
 	if (main !== null) switched.add(main);
+	for (const [ch, from] of before) copy_line_level(ch, from, live_channel(ch));
 	debugLog('BACKUP', main === null ? "Spare backup freed" : `Spare backup channel ${get_spare()} standing in for channel ${main}`);
 	backups_changed();
 	return get_backup_status();
@@ -1103,7 +1119,7 @@ const send_param = (ch, param, value) => {
  * @param {String[]} sections e.g. ['gain', 'eq']
  * @returns {{ok: true, settings: Object<string, Object>} | {ok: false, error: String}}
  */
-const capture_channel_settings = (ch, sections) => {
+const capture_channel_settings = (ch, sections, {log = true} = {}) => {
 	if (presonusClient === null || console_status.state !== 'connected') return {ok: false, error: "Connect to the console first"};
 	const live = live_channel(ch);
 	const settings = {};
@@ -1111,9 +1127,16 @@ const capture_channel_settings = (ch, sections) => {
 		const values = Object.fromEntries(SETTING_PARAMS[section].map((p) => [p, read_param(live, p)]).filter(([, v]) => v !== null));
 		if (Object.keys(values).length) settings[section] = values;
 	}
-	debugLog('SETTINGS', `Stored channel ${live}'s ${Object.keys(settings).join(", ") || "nothing"} from the console`);
+	if (log) debugLog('SETTINGS', `Stored channel ${live}'s ${Object.keys(settings).join(", ") || "nothing"} from the console`);
 	return {ok: true, settings};
 }
+
+/**
+ * A line's gain / HPF / EQ / dynamics on the console now, without storing anything (Show Setup
+ * shows them for a character with nothing stored yet)
+ * @param {Number} ch
+ */
+const read_channel_settings = (ch) => capture_channel_settings(ch, Object.keys(SETTING_PARAMS), {log: false});
 
 /**
  * The stored settings a channel should have with a profile (TheatreMix): each section the
@@ -1193,37 +1216,107 @@ const apply_channel_settings = (cue) => {
 }
 
 /**
- * Move each show channel's fader by its level offset in this cue (TheatreMix's level offsets):
- * by the difference from the offset it was last moved by, so the next cue puts it back unless
- * it has an offset too. Faders below -30 dB aren't moved. With "Store level offsets" off, any
- * applied offsets are taken back off.
- * @param {Cue | null} cue (null: Line Checks, no offsets)
+ * A show channel's level offset in a cue (dB), 0 unless Show Setup → "Store level offsets" is on
+ * @param {Cue | null} cue
+ * @param {Number} ch
  */
-const apply_level_offsets = (cue) => {
-	const enabled = getShow()?.config?.channelLevels === "1";
-	const offsets = enabled && cue ? parse_map(cue.channelLevels) : new Map();
-	const moved = [];
+const line_offset = (cue, ch) => {
+	if (!cue || getShow()?.config?.channelLevels !== "1") return 0;
+	return (Number(parse_map(cue.channelLevels).get(ch)) || 0) / 10;   // stored in tenths of a dB
+}
 
-	for (const ch of get_show_channels()) {
-		const target = (Number(offsets.get(ch)) || 0) / 10;   // stored in tenths of a dB
-		const delta = target - (line_offsets.get(ch) ?? 0);
-		if (Math.abs(delta) < 0.05) continue;
-		line_offsets.set(ch, target);
+/**
+ * A line's fader level on the console now (dB), or null if unknown
+ * @param {Number} line
+ */
+const read_line_level = (line) => {
+	const position = line_faders.get(line) ?? presonusClient?.getLevel({type: 'LINE', channel: line});
+	return typeof position === 'number' ? fader_to_level_exact(position) : null;
+}
 
-		const position = line_faders.get(ch) ?? presonusClient.getLevel({type: 'LINE', channel: ch});
-		if (typeof position !== 'number') continue;
-		const level = fader_to_level_exact(position);
-		if (level < OFFSET_FLOOR_DB) continue;
+/**
+ * Set a line's fader (dB)
+ * @param {Number} line
+ * @param {Number} db
+ */
+const set_line_level = (line, db) => {
+	const position = level_to_fader(Math.min(10, db));
+	line_faders.set(line, position);
+	presonusClient.setChannelVolumeLinear({type: 'LINE', channel: line}, position).catch((error) => {
+		debugLog('LEVELS', `Couldn't set channel ${line}'s fader`, error.message);
+	});
+}
 
-		const next = level_to_fader(Math.min(10, level + delta));
-		line_faders.set(ch, next);
-		presonusClient.setChannelVolumeLinear({type: 'LINE', channel: ch}, next).catch((error) => {
-			debugLog('LEVELS', `Couldn't move channel ${ch}'s fader`, error.message);
-		});
-		moved.push(`ch ${ch} ${delta > 0 ? "+" : ""}${delta.toFixed(1)} dB`);
+/**
+ * Put each line that's just come onto a DCA at 0 dB plus its level offset. Lines already on a
+ * DCA (this one or another) keep any trim the operator has given them; if their offset changes,
+ * the fader moves by the difference.
+ * @param {Cue | null} cue (null: Line Checks, nobody's on a DCA)
+ */
+const apply_line_levels = (cue) => {
+	const placed = new Set();
+	if (cue) for (const dca of get_dca_list()) {
+		for (const ch of get_dca_channels(cue, dca, {raw: true})) placed.add(ch);
 	}
 
-	if (moved.length) debugLog('LEVELS', `Level offsets${cue ? ` for cue ${cue.number}.${cue.point}` : " cleared"}: ${moved.join(", ")}`);
+	const moved = [];
+	for (const ch of placed) {
+		const offset = line_offset(cue, ch);
+		const live = live_channel(ch);
+		const before = line_placed.get(ch);
+		line_placed.set(ch, {live, offset});
+		if (before?.live === live) {
+			// Still on a DCA: keep the trim, shifted by any change in offset
+			const delta = offset - before.offset;
+			const level = read_line_level(live);
+			if (Math.abs(delta) < 0.05 || level === null) continue;
+			set_line_level(live, level + delta);
+			moved.push(`ch ${live} ${delta > 0 ? "+" : ""}${Number(delta.toFixed(1))} dB (offset)`);
+		} else {
+			set_line_level(live, offset);
+			moved.push(`ch ${live} ${format_offset(offset)}`);
+		}
+	}
+	// Off a DCA: it's muted, and set again when it next joins one
+	for (const ch of [...line_placed.keys()]) if (!placed.has(ch)) line_placed.delete(ch);
+
+	if (moved.length) debugLog('LEVELS', `Line faders for cue ${cue.number}.${cue.point}: ${moved.join(", ")}`);
+}
+
+/** "0 dB", "+2.5 dB", "-3 dB" */
+const format_offset = (db) => db === 0 ? "0 dB" : `${db > 0 ? "+" : ""}${Number(db.toFixed(1))} dB`;
+
+/**
+ * Each show channel's fader on the console now, against where it was put (the DCA editor
+ * shows lines that have been moved)
+ * @returns {{connected: boolean, cue: String | null, lines: Object<number, {line: Number, db: Number | null, target: Number | null}>}}
+ */
+const get_line_levels = () => {
+	const connected = presonusClient !== null && console_status.state === 'connected';
+	const lines = {};
+	if (connected) for (const ch of get_show_channels()) {
+		const live = live_channel(ch);
+		lines[ch] = {line: live, db: read_line_level(live), target: line_placed.get(ch)?.offset ?? null};
+	}
+	return {connected, cue: current_cue ? cue_key(current_cue) : null, lines};
+}
+
+/**
+ * Switching a channel to or from its backup: the new channel takes over the old one's fader
+ * level, if it's a sensible one (between -30 and +6 dB), else 0 dB plus the offset
+ * @param {Number} main
+ * @param {Number} from the line carrying it before
+ * @param {Number} to the line carrying it now
+ */
+const copy_line_level = (main, from, to) => {
+	if (presonusClient === null || from === to || !line_placed.has(main)) return;
+	const level = read_line_level(from);
+	const offset = line_offset(current_cue, main);
+	const sensible = level !== null && level >= COPY_LEVEL_MIN_DB && level <= COPY_LEVEL_MAX_DB;
+	const db = sensible ? level : offset;
+	set_line_level(to, db);
+	line_placed.set(main, {...line_placed.get(main), live: to});
+	debugLog('BACKUP', `Channel ${to} takes over channel ${from}'s fader: ${format_offset(Math.round(db * 10) / 10)}${sensible ? "" : ` (channel ${from} was at ${level === null ? "an unknown level" : format_offset(Math.round(level * 10) / 10)})`}`);
 }
 
 /**
@@ -1445,7 +1538,7 @@ const write_cue = async (_event, {cue_object, back = false}) => {
 	write_line_mutes(cue_channels, 'mute');
 	write_dcas(cue_object, restore);
 	write_line_mutes(cue_channels, 'unmute');
-	apply_level_offsets(cue_object);
+	apply_line_levels(cue_object);
 	apply_channel_settings(cue_object);
 	update_dca_colors();
 
@@ -1537,6 +1630,110 @@ const update_dca_color = (dca, next = get_next_cue()) => {
 const update_dca_colors = () => {
 	const next = get_next_cue();
 	for (const dca of get_dca_list()) update_dca_color(dca, next);
+	update_cue_display(next);
+}
+
+/**
+ * The current and next cue on the console itself (Console Setup → Cue Display):
+ *   - the Scenes screen's "Current Project" / "Current Scene" fields
+ *   - optionally the main fader's scribble strip (its name), with the current or next cue
+ * Scribble strips only fit about 10 characters, so they get just the cue number.
+ *   - the two DCAs after the show's last one (DCAs 9 and 10 for a show on 1-8), named
+ *     ">1.1" (now) and "^1.2" (next), so they sit beside the show's DCAs on the DCA layer.
+ *     Only their names and colors are written: their faders, mutes and channels aren't touched.
+ * What was last written: key -> value
+ * @type {Map<string, string>}
+ */
+let cue_display = new Map();
+
+// Cue display DCA scribble strip color
+const CUE_DISPLAY_COLOR = "ffffff";
+
+/** "1.5 Rafikis start singing" */
+const cue_text = (cue) => cue ? `${format_cue_number(Number(cue.number), Number(cue.point))} ${cue.name ?? ""}`.trim() : "";
+
+/** Scribble strip labels: ">1.1" for the current cue (">LC" in Line Checks), "^1.2" for the next ("^End" after the last) */
+const strip_now = (cue) => cue ? `>${format_cue_number(Number(cue.number), Number(cue.point))}` : ">LC";
+const strip_next = (cue) => cue ? `^${format_cue_number(Number(cue.number), Number(cue.point))}` : "^End";
+
+/** The spare DCAs that show the current and next cue: [now, next], within the console's DCAs */
+const cue_display_dcas = () => {
+	const count = presonusClient?.channelCounts?.DCA ?? 0;
+	const first = Math.max(0, ...show_dcas(getShow())) + 1;
+	return [first, first + 1].filter((d) => d <= count);
+}
+
+/**
+ * Write a cue display value if it changed
+ * @param {String} key
+ * @param {String} value
+ * @param {Function} send
+ */
+const display_write = (key, value, send) => {
+	if (cue_display.get(key) === value) return;
+	try {
+		send();
+		cue_display.set(key, value);
+	} catch (error) {
+		debugLog('CUEDISPLAY', `Couldn't write ${key}`, error.message);
+	}
+}
+
+/**
+ * Put the current and next cue on the console (and take them off when turned off)
+ * @param {Cue | null} next
+ */
+const update_cue_display = (next = get_next_cue()) => {
+	if (presonusClient === null || console_status.state !== 'connected') return;
+	if (current_cue === null && last_fired?.type !== 'linecheck') return;   // nothing fired yet
+
+	const {cueOnScenesScreen, cueOnSpareDcas, cueOnMain} = getSettings();
+	const now = current_cue ? cue_text(current_cue) : "Line Checks";
+	const coming = next ? cue_text(next) : "End of show";
+	const written = [];
+
+	const send_string = (key, value) => display_write(key, value, () => {
+		presonusClient._sendPacket('PS', Buffer.from(`${key}\0\0\0${value}\0`));
+		written.push(`${key} = "${value}"`);
+	});
+	for (const field of ['project', 'scene']) {
+		const value = !cueOnScenesScreen ? "" : field === 'project' ? `NOW ${now}` : `NEXT ${coming}`;
+		// Never written and turned off: leave the console's own names alone
+		if (!cueOnScenesScreen && !cue_display.has(`presets/loaded_${field}_title`)) continue;
+		send_string(`presets/loaded_${field}_title`, value);
+		send_string(`presets/loaded_${field}_name`, value);
+	}
+
+	// The main fader's scribble strip: the current or next cue, else back to "Main" if it showed one
+	if (cueOnMain !== 'off' || cue_display.has('main')) {
+		const label = cueOnMain === 'current' ? strip_now(current_cue) : cueOnMain === 'next' ? strip_next(next) : "Main";
+		display_write('main', label, () => {
+			presonusClient._sendPacket('PS', Buffer.from(`main/ch1/username\0\0\0${label}\0`));
+			written.push(`Main = "${label}"`);
+		});
+		if (cueOnMain === 'off') cue_display.delete('main');
+	}
+
+	const dcas = cueOnSpareDcas ? cue_display_dcas() : [];
+	// DCAs that showed cues but don't any more (turned off, or the show's DCAs changed): back to normal
+	for (const key of [...cue_display.keys()].filter((k) => k.startsWith('dca:'))) {
+		const dca = Number(key.split(':')[1]);
+		if (dcas.includes(dca)) continue;
+		presonusClient.setName({type: 'DCA', channel: dca}, `DCA ${dca}`);
+		set_color({type: 'DCA', channel: dca}, DCA_COLORS.off);
+		cue_display.delete(key);
+		written.push(`DCA ${dca} back to "DCA ${dca}"`);
+	}
+	dcas.forEach((dca, i) => {
+		const name = i === 0 ? strip_now(current_cue) : strip_next(next);
+		display_write(`dca:${dca}`, name, () => {
+			presonusClient.setName({type: 'DCA', channel: dca}, name);
+			set_color({type: 'DCA', channel: dca}, CUE_DISPLAY_COLOR);
+			written.push(`DCA ${dca} = "${name}"`);
+		});
+	});
+
+	if (written.length) debugLog('CUEDISPLAY', written.join(", "));
 }
 
 /**
@@ -1580,7 +1777,7 @@ const fire_sound_check = async (_event) => {
 	// No DCAs, so every show channel is muted
 	write_line_mutes([], 'mute');
 	write_dcas({});
-	apply_level_offsets(null);
+	apply_line_levels(null);
 	apply_channel_settings(null);
 	// Show Setup → Levels: "Force all faders to 0 dB in the Line Checks cue"
 	if (getShow()?.config?.cueZeroResetLevels === "1") {
@@ -1588,7 +1785,6 @@ const fire_sound_check = async (_event) => {
 		debugLog('LINECHECK', `Line faders of the show's channels to 0 dB: ch ${get_show_channels().join(", ")}`);
 		for (const ch of get_show_channels()) {
 			line_faders.set(ch, unity);
-			line_offsets.set(ch, 0);
 			presonusClient.setChannelVolumeLinear({type: 'LINE', channel: ch}, unity).catch((error) => {
 				debugLog('LINECHECK', `Couldn't set channel ${ch}'s fader`, error.message);
 			});
@@ -1725,5 +1921,63 @@ const sync_channel_monitor = () => {
 	update_dca_colors();
 }
 
+/**
+ * Help → Read User Layer from Console: ask the console for its User Layer the way Universal
+ * Control does ("Copy From Mixer" sends a JSON UserLayerSendRequest) and save everything the
+ * console sends back over the next few seconds, so the reply's format can be worked out.
+ * (The User Layer isn't in the console's shared state, so this is the only way to see it.)
+ * @returns {Promise<{ok: true, file: String, summary: String} | {ok: false, error: String}>}
+ */
+const probe_user_layer = async () => {
+	if (presonusClient === null || console_status.state !== 'connected') return {ok: false, error: "Connect to the console first"};
+	const socket = presonusClient.conn;
+	let raw = Buffer.alloc(0);
+	const tap = (bytes) => { raw = Buffer.concat([raw, bytes]); };
+	socket.on('data', tap);
+
+	// JSON packets: length (16-bit LE), two zero bytes, then the JSON
+	const json = Buffer.from(JSON.stringify({id: 'UserLayerSendRequest'}));
+	const length = Buffer.alloc(2);
+	length.writeUInt16LE(json.length);
+	debugLog('USERLAYER', "Asking the console for its User Layer (UserLayerSendRequest)");
+	presonusClient._sendPacket('JM', Buffer.concat([length, Buffer.from([0, 0]), json]));
+	await new Promise((resolve) => setTimeout(resolve, USER_LAYER_PROBE_MS));
+	socket.off('data', tap);
+
+	// Split the stream into packets: "UC\0\1", payload length (16-bit LE), code, 4 bytes, data
+	const packets = [];
+	for (let i = 0; i + 8 <= raw.length;) {
+		if (raw[i] !== 0x55 || raw[i + 1] !== 0x43 || raw[i + 2] !== 0 || raw[i + 3] !== 1) { i++; continue; }
+		const size = raw.readUInt16LE(i + 4);
+		const code = raw.subarray(i + 6, i + 8).toString('latin1');
+		packets.push({code, data: raw.subarray(i + 12, i + 6 + size)});
+		i += 6 + size;
+	}
+
+	const printable = (buf) => buf.toString('latin1').replace(/[^\x20-\x7e\n]/g, '.');
+	const lines = [`User Layer probe, ${new Date().toISOString()}, console ${console_status.host}`, `${raw.length} bytes, ${packets.length} packets`, ""];
+	for (const {code, data} of packets) {
+		lines.push(`--- ${code} (${data.length} bytes)`);
+		lines.push(printable(data));
+		if (code === 'ZB' || code === 'CK') {
+			for (const offset of [0, 4, 8]) {
+				try { lines.push(`[inflated from byte ${offset}]`, printable(zlib.inflateSync(data.subarray(offset)))); break; } catch { /* not zlib here */ }
+			}
+		}
+		lines.push(`[base64] ${data.toString('base64')}`, "");
+	}
+
+	const file = path.join(app.getPath('logs'), `userlayer-probe-${Date.now()}.txt`);
+	fs.mkdirSync(path.dirname(file), {recursive: true});
+	fs.writeFileSync(file, lines.join("\n"));
+	const counts = Object.entries(packets.reduce((c, p) => ({...c, [p.code]: (c[p.code] ?? 0) + 1}), {})).map(([k, n]) => `${n} ${k}`).join(", ");
+	const summary = packets.length ? `The console sent ${counts}.` : "The console didn't send anything back.";
+	debugLog('USERLAYER', `${summary} Saved to ${file}`);
+	return {ok: true, file, summary};
+}
+
+// How long to collect the console's reply to a User Layer request
+const USER_LAYER_PROBE_MS = 4000;
+
 export {discover, connect, auto_connect, show_opened, disconnect, write_cue, fire_sound_check, reset_console_state, sync_channel_monitor, get_console_status, consoleEvents,
-	get_backup_status, toggle_backup, assign_spare, capture_channel_settings};
+	get_backup_status, toggle_backup, assign_spare, capture_channel_settings, read_channel_settings, get_line_levels, probe_user_layer};

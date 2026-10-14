@@ -13,9 +13,9 @@ import {
 	showEvents, getShow, getShowState, closeShow, newShow, confirmDiscardChanges,
 	saveShow, saveShowAs, mergeTmix
 } from './showManager.js';
-import { show_opened, sync_channel_monitor } from './sound.js';
+import { show_opened, sync_channel_monitor, probe_user_layer } from './sound.js';
 import { openActiveCueWindow, exportNotes, clearMarks } from './cueInfo.js';
-import { getSettings, updateSettings, removeRecentFile } from './settings.js';
+import { getSettings, updateSettings, removeRecentFile, viewSettings } from './settings.js';
 import { getConsoleButtonReport, getLogAllConsoleMessages, setLogAllConsoleMessages } from './consoleButtons.js';
 import { getDebugLogPath } from './debugLog.js';
 
@@ -48,8 +48,7 @@ const sendMenuAction = (action) => {
 const sendViewSettings = () => {
 	const window = getMainWindow();
 	if (window && !window.isDestroyed()) {
-		const {rowSize, lockEditing, showPositions, colorBlindDca} = getSettings();
-		window.webContents.send('view-settings', {rowSize, lockEditing, showPositions, colorBlindDca});
+		window.webContents.send('view-settings', viewSettings());
 	}
 }
 
@@ -129,6 +128,26 @@ const handle_console_buttons = async () => {
 	if (response === 1) handle_show_debug_log();
 }
 
+/**
+ * Help → Read User Layer from Console...: save the console's reply to a User Layer request
+ * (to work out whether the app can set the User Layer)
+ */
+const handle_probe_user_layer = async () => {
+	const result = await probe_user_layer();
+	if (!result.ok) {
+		dialog.showMessageBox(getMainWindow(), {type: 'warning', message: "Couldn't read the User Layer", detail: result.error});
+		return;
+	}
+	const { response } = await dialog.showMessageBox(getMainWindow(), {
+		type: 'info',
+		message: "User Layer request sent",
+		detail: `${result.summary}\n\nEverything it sent is saved in:\n${result.file}\n\nPlease send that file (and the debug log) to Max.`,
+		buttons: ['OK', 'Show File'],
+		defaultId: 1,
+	});
+	if (response === 1) shell.showItemInFolder(result.file);
+}
+
 const handle_show_debug_log = () => {
 	const logPath = getDebugLogPath();
 
@@ -152,7 +171,8 @@ const handle_lock_editing = (menuItem) => {
 }
 
 const handle_row_size = (rowSize) => {
-	updateSettings({rowSize});
+	// A preset replaces any font size set in Settings
+	updateSettings({rowSize, fontSize: null});
 	sendViewSettings();
 }
 
@@ -164,7 +184,7 @@ const handle_row_size = (rowSize) => {
  */
 const buildTemplate = () => {
 	const {hasShow, isTmixp, qLabEnabled, canSave} = getShowState();
-	const {recentFiles, rowSize, lockEditing, showPositions, colorBlindDca} = getSettings();
+	const {recentFiles, rowSize, fontSize, lockEditing, showPositions, colorBlindDca} = getSettings();
 
 	// Feature not in this app yet
 	const notImplemented = {enabled: false};
@@ -182,6 +202,8 @@ const buildTemplate = () => {
 			label: app.name,
 			submenu: [
 				{ role: 'about' },
+				{ type: 'separator' },
+				{ label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => sendMenuAction('preferences') },
 				{ type: 'separator' },
 				{ role: 'services' },
 				{ type: 'separator' },
@@ -275,7 +297,7 @@ const buildTemplate = () => {
 					submenu: ['small', 'medium', 'large'].map((size) => ({
 						label: size[0].toUpperCase() + size.slice(1),
 						type: 'radio',
-						checked: rowSize === size,
+						checked: fontSize === null && rowSize === size,
 						enabled: hasShow,
 						click: () => handle_row_size(size)
 					}))
@@ -283,6 +305,7 @@ const buildTemplate = () => {
 				{ type: 'separator' },
 				{ label: 'Channel Utilisation', accelerator: 'CmdOrCtrl+U', enabled: hasShow, click: () => sendMenuAction('channel-utilisation') },
 				{ label: 'Active Cue Info', accelerator: 'CmdOrCtrl+I', click: () => openActiveCueWindow() },
+				...(isMac ? [] : [{ label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => sendMenuAction('preferences') }]),
 
 				// Developer tools while running from source
 				...(app.isPackaged ? [] : [
@@ -333,6 +356,7 @@ const buildTemplate = () => {
 					click: (menuItem) => setLogAllConsoleMessages(menuItem.checked)
 				},
 				{ label: 'Show Debug Log', click: handle_show_debug_log },
+				{ label: 'Read User Layer from Console...', click: handle_probe_user_layer },
 				...(isMac ? [] : [
 					{ type: 'separator' },
 					{ role: 'about' },

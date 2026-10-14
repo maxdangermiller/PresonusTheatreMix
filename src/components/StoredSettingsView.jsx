@@ -28,8 +28,9 @@ const EqCurve = ({eq}) => {
 			{[100, 1000, 10000].map((hz) => <line key={hz} x1={x_of(hz)} x2={x_of(hz)} y1={0} y2={GRAPH_H} stroke="#2c2c2c"/>)}
 			{[-10, 0, 10].map((db) => <line key={db} x1={0} x2={GRAPH_W} y1={y_of(db)} y2={y_of(db)} stroke={db === 0 ? "#444" : "#2c2c2c"}/>)}
 			{[[100, "100"], [1000, "1k"], [10000, "10k"]].map(([hz, t]) => <text key={hz} x={x_of(hz) + 3} y={GRAPH_H - 4} fill="#777" fontSize="10">{t}</text>)}
-			<polyline points={points.join(" ")} fill="none" stroke={eq.on ? "#4fc3f7" : "#666"} strokeWidth="2"/>
-			{eq.bands.filter((b) => b.on).map((b) => <circle key={b.band} cx={x_of(b.hz)} cy={y_of(eq.on ? b.db : 0)} r="3.5" fill={eq.on ? "#fff" : "#666"}/>)}
+			<polyline points={points.join(" ")} fill="none" stroke={eq.on ? "#4fc3f7" : "#7a7a7a"} strokeWidth="2" strokeDasharray={eq.on ? undefined : "5 4"}/>
+			{eq.bands.filter((b) => b.on).map((b) => <circle key={b.band} cx={x_of(b.hz)} cy={y_of(b.db)} r="3.5" fill={eq.on ? "#fff" : "#888"}/>)}
+			{eq.on ? null : <text x={GRAPH_W - 6} y={14} fill="#aaa" fontSize="11" textAnchor="end">EQ is off</text>}
 		</svg>
 	);
 }

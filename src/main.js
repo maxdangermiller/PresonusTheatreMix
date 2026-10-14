@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, Menu, shell, powerSaveBlocker } from 'elec
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 
-import {discover, connect, auto_connect, show_opened, disconnect, write_cue, fire_sound_check, reset_console_state, get_console_status, sync_channel_monitor, consoleEvents, get_backup_status, toggle_backup, assign_spare, capture_channel_settings} from './main/sound.js';
+import {discover, connect, auto_connect, show_opened, disconnect, write_cue, fire_sound_check, reset_console_state, get_console_status, sync_channel_monitor, consoleEvents, get_backup_status, toggle_backup, assign_spare, capture_channel_settings, read_channel_settings, get_line_levels} from './main/sound.js';
 import {showEvents, loadShow, getShow, getShowState, saveShow, setDcaLevel, setConsoleSetup, editShow, undoEdit, redoEdit, isShowDirty, confirmDiscardChanges} from './main/showManager.js';
 import {qlabEvents, syncQLab, recallQLabCue, getQLabStatus, stopQLab} from './main/qlab.js';
 import {startOscServer, stopOscServer, notifyCueFired} from './main/oscServer.js';
@@ -12,7 +12,7 @@ import {syncConsoleButtons, setButtonActionHandler, buttonEvents, effectiveButto
 
 import {handle_open_file} from './main/fileManager.js';
 import {initMenu, updateMenu, sendViewSettings, sendMenuAction, setLockEditing, setEditorSelection, handleNewShow} from './main/menuManager.js';
-import {getSettings, updateSettings} from './main/settings.js';
+import {getSettings, updateSettings, viewSettings, clean_font_size, clean_column_widths, MAIN_LABEL_CHOICES} from './main/settings.js';
 import fs from 'node:fs';
 // import {open_dialog} from './main/dialog.js';
 
@@ -102,6 +102,8 @@ ipcMain.handle('show:redo', async () => { return redoEdit(); });
 
 // Show / Actor Setup → Store from console: a line's gain / HPF / EQ / dynamics
 ipcMain.handle('presonus:capture_settings', async (_, {channel, sections}) => capture_channel_settings(channel, sections));
+ipcMain.handle('presonus:read_settings', async (_, channel) => read_channel_settings(channel));
+ipcMain.handle('presonus:get_line_levels', async () => get_line_levels());
 
 // Backup channels: the cue list's tray
 ipcMain.handle('presonus:get_backups', async () => get_backup_status());
@@ -140,12 +142,22 @@ ipcMain.handle('menu:trigger', async (_, action) => {
 ipcMain.handle('show:edit_state', async () => { const {canUndo, canRedo} = getShowState(); return {canUndo, canRedo}; });
 ipcMain.handle('app:set_lock_editing', async (_, locked) => { setLockEditing(locked); });
 // Toolbar View Positions (View → Positions)
+// Settings → font size, and cue list column widths dragged in the header
+ipcMain.handle('app:update_view_settings', async (_, changes) => {
+	const allowed = {};
+	if (changes && 'fontSize' in changes) allowed.fontSize = clean_font_size(changes.fontSize);
+	if (changes && 'columnWidths' in changes) allowed.columnWidths = clean_column_widths(changes.columnWidths);
+	updateSettings(allowed);
+	sendViewSettings();
+	updateMenu();
+	return viewSettings();
+});
 ipcMain.handle('app:set_show_positions', async (_, on) => { updateSettings({showPositions: !!on}); sendViewSettings(); updateMenu(); });
 ipcMain.handle('show:save', async () => { return saveShow(); });
 ipcMain.handle('show:can_save', async () => { return getShowState().canSave; });
 
-// Console Setup preferences: DCA Recall and "Connect automatically"
-const CONSOLE_PREFS = ['levelsFollowPeople', 'restoreOnBack', 'autoConnect'];
+// Console Setup preferences: DCA Recall, Cue Display and "Connect automatically"
+const CONSOLE_PREFS = ['levelsFollowPeople', 'restoreOnBack', 'autoConnect', 'cueOnScenesScreen', 'cueOnSpareDcas', 'cueOnMain'];
 const consolePrefs = () => Object.fromEntries(CONSOLE_PREFS.map((key) => [key, getSettings()[key]]));
 ipcMain.handle('app:get_recall_settings', async () => consolePrefs());
 ipcMain.handle('app:set_recall_settings', async (_, changes) => {
@@ -153,7 +165,10 @@ ipcMain.handle('app:set_recall_settings', async (_, changes) => {
 	for (const key of CONSOLE_PREFS) {
 		if (typeof changes?.[key] === 'boolean') allowed[key] = changes[key];
 	}
+	if (MAIN_LABEL_CHOICES.includes(changes?.cueOnMain)) allowed.cueOnMain = changes.cueOnMain;
 	updateSettings(allowed);
+	// Cue Display may have been turned on or off
+	sync_channel_monitor();
 	return consolePrefs();
 });
 
@@ -161,8 +176,7 @@ ipcMain.handle('app:set_recall_settings', async (_, changes) => {
 let autoConnectStarted = false;
 
 ipcMain.handle('app:get_view_settings', async () => {
-	const {rowSize, lockEditing, showPositions, colorBlindDca} = getSettings();
-	return {rowSize, lockEditing, showPositions, colorBlindDca};
+	return viewSettings();
 });
 
 ipcMain.handle('electronAPI:openFile', handle_open_file);

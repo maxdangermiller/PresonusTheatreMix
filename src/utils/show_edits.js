@@ -269,7 +269,13 @@ const OPS = {
 				if (d === dca) continue;
 				const others = parse_channels(target[dca_field(d, 'Channels')]);
 				const kept = others.filter((ch) => !list.includes(ch));
-				if (kept.length !== others.length) target[dca_field(d, 'Channels')] = kept.join(",");
+				if (kept.length === others.length) continue;
+				target[dca_field(d, 'Channels')] = kept.join(",");
+				// No blank DCAs: one left with nobody on it is cleared (label and level too)
+				if (!kept.length) {
+					target[dca_field(d, 'Label')] = null;
+					set_dca_level_entry(show, cue, d, null);
+				}
 			}
 		}
 

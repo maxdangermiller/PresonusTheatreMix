@@ -45,7 +45,7 @@ const eq_bands = (eq) => ({
  * @param {Number} hz
  */
 const eq_response = (eq, hz) => {
-	if (!eq.on) return 0;
+	// The curve keeps its shape when the EQ is switched off (drawn dimmed), so it can still be read
 	let total = 0;
 	for (const b of eq.bands) {
 		if (!b.on || Math.abs(b.db) < 0.01) continue;

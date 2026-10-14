@@ -40,6 +40,10 @@ contextBridge.exposeInMainWorld('presonus', {
 
 	// Store from console: {ok: true, settings: {section: {param: value}}} or {ok: false, error}
 	captureSettings: (channel, sections) => ipcRenderer.invoke('presonus:capture_settings', {channel, sections}),
+	// A line's settings on the console now (nothing stored): {ok, settings} or {ok: false, error}
+	readSettings: (channel) => ipcRenderer.invoke('presonus:read_settings', channel),
+	// Show channels' faders on the console now: {connected, cue: "1.5" | null, lines: {ch: {line, db, target}}}
+	getLineLevels: () => ipcRenderer.invoke('presonus:get_line_levels'),
 
 	// Backup channels: {pairs: [{main, backup, label, switched, spare}], spare, spareFor}
 	getBackups: () => ipcRenderer.invoke('presonus:get_backups'),
@@ -157,6 +161,8 @@ contextBridge.exposeInMainWorld('menuApi', {
 	getViewSettings: () => ipcRenderer.invoke('app:get_view_settings'),
 	setLockEditing: (locked) => ipcRenderer.invoke('app:set_lock_editing', locked),
 	setShowPositions: (on) => ipcRenderer.invoke('app:set_show_positions', on),
+	// {fontSize?: Number | null, columnWidths?: {col: px}}
+	updateViewSettings: (changes) => ipcRenderer.invoke('app:update_view_settings', changes),
 	onViewSettings: (callback) => subscribe('view-settings', callback),
 });
 

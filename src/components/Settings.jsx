@@ -35,9 +35,11 @@ const TITLE_BAR_STYLE = {
     borderBottom: "1px solid rgb(30, 30, 30)",
 };
 
+// Scrolls when the window is too short for everything (the buttons stay at the bottom)
 const BODY_STYLE = {
     flex: 1,
     minHeight: 0,
+    overflowY: "auto",
     display: "flex",
     flexDirection: "column",
     gap: "12px",

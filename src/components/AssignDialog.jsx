@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 import Dialog, { BUTTON_STYLE, INPUT_STYLE } from './Dialog.jsx';
 import { SELECTED_COLOR, BORDER_COLOR } from './utils/colors.jsx';
@@ -27,7 +27,7 @@ const COLUMN_STYLE = {display: "flex", flexDirection: "column", gap: "8px"}
  * @property {Object} show
  * @property {Object} cue
  * @property {Number} dca
- * @property {Function} onSave - called with {channels, label, positions, profiles, levels, dcaLevel}
+ * @property {Function} onSave - called with {channels, label, positions, profiles, levels, dcaLevel, offsetsOn}
  * @property {Function} onCancel
  */
 
@@ -53,6 +53,20 @@ const AssignDialog = ({show, cue, dca, onSave, onCancel}) => {
 	const [leftPick, setLeftPick] = useState(null);     // {ch, profile}
 	const [rightPick, setRightPick] = useState(null);   // ch
 	const [ensembleId, setEnsembleId] = useState("");
+	// Show Setup → Levels "Store level offsets": offsets only move faders when it's on
+	const [offsetsOn, setOffsetsOn] = useState(show.config?.channelLevels === "1");
+	// The console's line faders, when this is the active cue: shown where they've been moved
+	const [console_levels, setConsoleLevels] = useState(null);
+
+	useEffect(() => {
+		let current = true;
+		const read = () => window.presonus.getLineLevels?.().then((result) => {
+			if (current) setConsoleLevels(result?.connected && result.cue === `${Number(cue.number)}.${Number(cue.point)}` ? result.lines : null);
+		});
+		read();
+		const timer = setInterval(read, 1000);
+		return () => { current = false; clearInterval(timer); };
+	}, [cue]);
 
 	const positions = show.positions ?? [];
 	const others = useMemo(() => cue_channel_dcas(cue), [cue]);
@@ -111,7 +125,20 @@ const AssignDialog = ({show, cue, dca, onSave, onCancel}) => {
 		profiles: Object.fromEntries(items.map((i) => [i.ch, i.profile])),
 		levels: Object.fromEntries(items.map((i) => [i.ch, i.offset])),
 		dcaLevel,
+		offsetsOn,
 	});
+
+	/**
+	 * A line's fader on the console, when it isn't where the cue put it (0 dB plus the offset)
+	 * @param {{ch: Number, offset: Number}} item
+	 * @returns {{db: Number, line: Number} | null}
+	 */
+	const movedFader = (item) => {
+		const level = console_levels?.[item.ch];
+		if (!level || level.db === null || level.target === null) return null;
+		return Math.abs(level.db - level.target) >= 0.05 ? level : null;
+	}
+	const fmt = (db) => db <= -80 ? "-∞" : `${db > 0 ? "+" : ""}${db.toFixed(1)}`;
 
 	const autoLabel = items.length > 1 ? "Group" : items.length ? profileName(items[0].ch, items[0].profile) : "";
 
@@ -198,6 +225,7 @@ const AssignDialog = ({show, cue, dca, onSave, onCancel}) => {
 								<th style={TABLE_HEAD_STYLE}>Channel</th>
 								<th style={TABLE_HEAD_STYLE}>Pos</th>
 								<th style={TABLE_HEAD_STYLE}>Offset</th>
+								{console_levels ? <th style={TABLE_HEAD_STYLE} title="The line's fader on the console now, when it's been moved from 0 dB plus its offset">Fader</th> : null}
 							</tr>
 						</thead>
 						<tbody>
@@ -232,12 +260,39 @@ const AssignDialog = ({show, cue, dca, onSave, onCancel}) => {
 											aria-label={`Level offset for channel ${i.ch}`}
 										/> dB
 									</td>
+									{console_levels ? <td style={{padding: "2px 4px", whiteSpace: "nowrap", fontSize: 14}}>
+										{(() => {
+											const moved = movedFader(i);
+											if (!moved) return <span style={{opacity: 0.45}}>{console_levels[i.ch]?.target === null ? "" : "unity"}</span>;
+											const offset = Math.round(Math.min(MAX_OFFSET, Math.max(MIN_OFFSET, moved.db)) * 10) / 10;
+											return (
+												<button
+													style={{...BUTTON_STYLE, fontSize: 13, padding: "0 6px", color: "#ffb86b", borderColor: "#ffb86b"}}
+													onClick={(e) => { e.stopPropagation(); update(i.ch, {offset}); setOffsetsOn(true); }}
+													title={`Channel ${moved.line}'s fader has been moved on the console. Click to keep ${fmt(offset)} dB as this line's offset in this cue.`}
+													aria-label={`Keep fader ${fmt(moved.db)} dB as the offset`}
+												>{fmt(moved.db)} dB</button>
+											);
+										})()}
+									</td> : null}
 								</tr>
 							))}
 						</tbody>
 					</table>
 					{!items.length ? <div style={{padding: 10, opacity: 0.6, fontSize: 14}}>No channels: pick one on the left and Assign.</div> : null}
 				</div>
+			</div>
+
+			<div style={{display: "flex", alignItems: "center", gap: "10px", fontSize: 13}}>
+				<label style={{display: "flex", alignItems: "center", gap: "6px", whiteSpace: "nowrap", fontSize: 15}}>
+					<input type="checkbox" checked={offsetsOn} onChange={(e) => setOffsetsOn(e.target.checked)}/>
+					Apply level offsets
+				</label>
+				<span style={{opacity: 0.7}}>
+					{offsetsOn
+						? "Each line's fader goes to 0 dB plus its offset when it joins the DCA (whole show: Show Setup → Levels)."
+						: "Off: every line's fader goes to 0 dB when it joins the DCA, and offsets are kept but not used."}
+				</span>
 			</div>
 
 			<div style={{display: "flex", alignItems: "center", gap: "10px", borderTop: "1px solid " + BORDER_COLOR, paddingTop: 10}}>

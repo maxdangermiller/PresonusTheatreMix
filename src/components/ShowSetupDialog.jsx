@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 import Dialog, { BUTTON_STYLE, INPUT_STYLE } from './Dialog.jsx';
 import { SELECTED_COLOR, BORDER_COLOR } from './utils/colors.jsx';
@@ -21,7 +21,8 @@ const TABLE_BOX_STYLE = {border: "1px solid #555", backgroundColor: "#141414", o
 // The other tabs: a column of settings that scrolls on its own if the window is short
 const TAB_PAGE_STYLE = {display: "flex", flexDirection: "column", gap: 14, padding: "8px 20px", overflowY: "auto", minHeight: 0};
 const ROW_BUTTON_STYLE = {...BUTTON_STYLE, whiteSpace: "nowrap", fontSize: 14, padding: "0.3rem 0.6rem"};
-const STORED_BOX_STYLE = {border: "1px solid #444", borderRadius: 4, padding: "8px 10px", flexShrink: 0, overflowX: "auto"};
+// Never squeezed out of view: it takes up to half the tab and scrolls past that
+const STORED_BOX_STYLE = {border: "1px solid #444", borderRadius: 4, padding: "8px 10px", flexShrink: 0, maxHeight: "50%", overflow: "auto"};
 const HEAD_STYLE = {textAlign: "left", fontWeight: "normal", fontSize: 13, color: "#b5b5b5", padding: "4px 6px", borderBottom: "1px solid #444", position: "sticky", top: 0, backgroundColor: "#141414", zIndex: 1};
 const CELL_STYLE = {padding: "1px 4px", fontSize: 14};
 const SMALL_INPUT = {...INPUT_STYLE, padding: "1px 4px", fontSize: 14, width: "100%", boxSizing: "border-box"};
@@ -49,6 +50,26 @@ const Check = ({checked, onChange, children, note, disabled}) => (
  * File → Show Setup: the show's channels (names, console labels, profiles), DCAs and settings
  * @param {ShowSetupDialogProps} props
  */
+/**
+ * Nothing stored yet: the line's settings on the console now, so there's still something to see
+ * @param {{channel: Number}} props
+ */
+const LiveSettings = ({channel}) => {
+	const [live, setLive] = useState(null);
+	useEffect(() => {
+		setLive(null);
+		let current = true;
+		window.presonus.readSettings(channel).then((result) => { if (current) setLive(result); });
+		return () => { current = false; };
+	}, [channel]);
+	if (!live) return <div style={{fontSize: 13, opacity: 0.6}}>Reading the console…</div>;
+	if (!live.ok) return <div style={{fontSize: 13, opacity: 0.6}}>Nothing stored yet, and the console isn't connected to show what's on it now.</div>;
+	return <>
+		<div style={{fontSize: 13, color: "#ffb86b", marginBottom: 6}}>Nothing stored yet. This is line {channel} on the console now; Store from console saves it.</div>
+		<StoredSettingsView settings={live.settings}/>
+	</>;
+}
+
 const ShowSetupDialog = ({show, onSave, onCancel}) => {
 	const [tab, setTab] = useState(TABS[0]);
 	const [config, setConfig] = useState(() => ({...show.config}));
@@ -165,7 +186,9 @@ const ShowSetupDialog = ({show, onSave, onCancel}) => {
 					</select>
 				) : null}
 			</div>
-			<StoredSettingsView settings={storedFor(owner)}/>
+			{Object.keys(storedFor(owner)).length
+				? <StoredSettingsView settings={storedFor(owner)}/>
+				: <LiveSettings channel={Number(profile.channel)}/>}
 		</>;
 	}
 
@@ -318,12 +341,12 @@ const ShowSetupDialog = ({show, onSave, onCancel}) => {
 						</tbody>
 					</table>
 				</div>
-				<div style={{display: "flex", gap: 8, alignItems: "center", flexShrink: 0}}>
+				<div style={{display: "flex", gap: 8, alignItems: "center", flexShrink: 0, flexWrap: "wrap"}}>
 					<button style={ROW_BUTTON_STYLE} onClick={addProfile} disabled={!picked} title="Add another character (profile) to the selected line">+ Character</button>
 					<button style={ROW_BUTTON_STYLE} onClick={removeProfile} disabled={picked?.profile === undefined} title="Remove the selected profile">−</button>
 					<button style={ROW_BUTTON_STYLE} onClick={storeFromConsole} disabled={!picked} title="Store the selected profile's ticked sections from its channel on the console now">Store from console</button>
 					<button style={ROW_BUTTON_STYLE} onClick={clearStored} disabled={!picked} title="Forget the selected profile's stored settings">Clear stored</button>
-					<span style={{fontSize: 13, opacity: 0.7, flex: 1, minWidth: 0}}>{storeMessage || "Ticked Store sections (◆ stored) go on the console when a cue uses the character."}</span>
+					<span style={{fontSize: 13, opacity: 0.7, flex: "1 1 240px", minWidth: 0}}>{storeMessage || "Ticked Store sections (◆ stored) go on the console when a cue uses the character."}</span>
 					<label style={{marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap"}}>
 						Spare backup channel:
 						<select value={spare || ""} onChange={(e) => set('spareBackup', e.target.value || "0")} style={INPUT_STYLE}>
@@ -337,7 +360,7 @@ const ShowSetupDialog = ({show, onSave, onCancel}) => {
 
 			{tab === 'Levels' && <div style={TAB_PAGE_STYLE}>
 				<Check checked={flag('channelLevels')} onChange={setFlag('channelLevels')}
-					note="Lets channels have level offsets programmed into cues (Assign → Offset), to balance a big ensemble DCA or a channel that moves between lead and ensemble roles. When a cue fires, each channel's fader moves by its offset, and the next cue puts it back (faders below −30 dB aren't moved). Unchecking takes them off and keeps them in the cues.">
+					note="Lets channels have level offsets programmed into cues (Assign → Offset), to balance a big ensemble DCA or a channel that moves between lead and ensemble roles. A line's fader goes to 0 dB when it joins a DCA; with this on, to 0 dB plus its offset. Unchecking keeps the offsets in the cues without using them.">
 					Store level offsets
 				</Check>
 				<Check checked={flag('cueZeroResetLevels')} onChange={setFlag('cueZeroResetLevels')}>
