@@ -1,14 +1,14 @@
 import React, { useMemo, useState } from 'react';
 
 import Dialog, { BUTTON_STYLE, INPUT_STYLE } from './Dialog.jsx';
-import { SELECTED_COLOR } from './utils/colors.jsx';
+import { SELECTED_COLOR, themed } from './utils/colors.jsx';
 import { parse_map, serialize_map, controlled_channels, default_profile, SETTING_SECTIONS, profile_flags, with_profile_flags } from '../utils/show_edits.js';
 
 const SECTION_NAMES = {gain: "Gain", hpf: "HPF", eq: "EQ", dyn: "Dyn"};
 const FLAG_CELL = {width: 46, textAlign: "center", fontSize: 13};
 
-const LIST_BOX_STYLE = {border: "1px solid #555", backgroundColor: "#141414", overflowY: "auto", height: 400, flexShrink: 0};
-const CHANNEL_ROW_STYLE = {padding: "4px 8px", fontSize: 14, opacity: 0.8, borderTop: "1px solid #2a2a2a"};
+const LIST_BOX_STYLE = {border: `1px solid ${themed('lineStrong')}`, backgroundColor: themed('panel'), overflowY: "auto", height: 400, flexShrink: 0};
+const CHANNEL_ROW_STYLE = {padding: "4px 8px", fontSize: 14, opacity: 0.8, borderTop: `1px solid ${themed('line')}`};
 const ACTOR_ROW_STYLE = {padding: "2px 8px 2px 40px", display: "flex", alignItems: "center", gap: 8};
 
 /**
@@ -175,7 +175,7 @@ const ActorSetupDialog = ({show, onSave, onCancel}) => {
 	return (
 		<Dialog title="Actor Setup" width={760} onCancel={onCancel} onSubmit={save}>
 			<div style={LIST_BOX_STYLE}>
-				<div style={{...CHANNEL_ROW_STYLE, display: "flex", fontSize: 12, opacity: 0.7, position: "sticky", top: 0, backgroundColor: "#141414", zIndex: 1}}>
+				<div style={{...CHANNEL_ROW_STYLE, display: "flex", fontSize: 12, opacity: 0.7, position: "sticky", top: 0, backgroundColor: themed('panel'), zIndex: 1}}>
 					<span style={{flex: 1}}>Channel / actors</span>
 					{SETTING_SECTIONS.map((x) => <span key={x} style={FLAG_CELL}>Store<br/>{SECTION_NAMES[x]}</span>)}
 				</div>

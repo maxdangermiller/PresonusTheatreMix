@@ -1,14 +1,14 @@
 import React, { useMemo, useState } from 'react';
 
 import Dialog, { BUTTON_STYLE, INPUT_STYLE } from './Dialog.jsx';
-import { SELECTED_COLOR } from './utils/colors.jsx';
+import { SELECTED_COLOR, themed } from './utils/colors.jsx';
 import { parse_channels, parse_map, serialize_map, controlled_channels, default_profile } from '../utils/show_edits.js';
 
-const GRID_BOX_STYLE = {border: "1px solid #555", backgroundColor: "#141414", overflow: "auto", maxHeight: 420, flexShrink: 0};
-const HEAD_STYLE = {fontWeight: "normal", fontSize: 12, padding: "4px 6px", borderBottom: "1px solid #444", position: "sticky", top: 0, backgroundColor: "#141414", textAlign: "center", whiteSpace: "nowrap", zIndex: 1};
+const GRID_BOX_STYLE = {border: `1px solid ${themed('lineStrong')}`, backgroundColor: themed('panel'), overflow: "auto", maxHeight: 420, flexShrink: 0};
+const HEAD_STYLE = {fontWeight: "normal", fontSize: 12, padding: "4px 6px", borderBottom: `1px solid ${themed('line')}`, position: "sticky", top: 0, backgroundColor: themed('panel'), textAlign: "center", whiteSpace: "nowrap", zIndex: 1};
 const NAME_HEAD_STYLE = {...HEAD_STYLE, left: 0, zIndex: 2, textAlign: "left", minWidth: 150};
-const CELL_STYLE = {padding: "2px 6px", textAlign: "center", borderBottom: "1px solid #222"};
-const NAME_CELL_STYLE = {padding: "2px 6px", position: "sticky", left: 0, backgroundColor: "#141414", zIndex: 1};
+const CELL_STYLE = {padding: "2px 6px", textAlign: "center", borderBottom: `1px solid ${themed('line')}`};
+const NAME_CELL_STYLE = {padding: "2px 6px", position: "sticky", left: 0, backgroundColor: themed('panel'), zIndex: 1};
 
 /**
  * @typedef {Object} EnsembleSetupDialogProps
@@ -77,8 +77,8 @@ const EnsembleSetupDialog = ({show, onSave, onCancel}) => {
 							{channels.map(({ch}) => <td key={ch} style={CELL_STYLE}><input type="checkbox" checked readOnly disabled/></td>)}
 						</tr>
 						{ensembles.map((e, index) => (
-							<tr key={index} style={{backgroundColor: picked === index ? "#1d3557" : "transparent"}} onMouseDown={() => setPicked(index)}>
-								<td style={{...NAME_CELL_STYLE, backgroundColor: picked === index ? SELECTED_COLOR : "#141414"}}>
+							<tr key={index} style={{backgroundColor: picked === index ? `color-mix(in srgb, ${SELECTED_COLOR} 45%, transparent)` : "transparent"}} onMouseDown={() => setPicked(index)}>
+								<td style={{...NAME_CELL_STYLE, backgroundColor: picked === index ? SELECTED_COLOR : themed('panel')}}>
 									<input
 										value={e.name}
 										onChange={(ev) => setEnsembles((prev) => prev.map((x, i) => i === index ? {...x, name: ev.target.value} : x))}

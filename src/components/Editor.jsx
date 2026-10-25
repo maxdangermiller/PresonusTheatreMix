@@ -28,8 +28,8 @@ const SETUP_DIALOGS = {
 
 import {
 	HEADER_COLOR, ACTIVE_CUE_ACCENT, ACTIVE_CUE_TINT, BORDER_COLOR,
-	TEXT_COLOR, SELECTED_COLOR, DCA_STATE_COLORS,
-	get_cue_color
+	TEXT_COLOR, SELECTED_COLOR, ON_SELECTED_COLOR, DCA_STATE_COLORS,
+	get_cue_color, themed
 } from './utils/colors.jsx';
 import { next_cue, dca_next_state, color_blind_state } from '../utils/dca_state.js';
 import JumpDialog from './JumpDialog.jsx';
@@ -50,7 +50,7 @@ const SCROLL_BOX_STYLE = {
 	flex: 1,
 	minWidth: 0,
 	overflow: 'auto',
-	backgroundColor: "#000",
+	backgroundColor: themed('cueList'),
 	border: '1px solid ' + BORDER_COLOR,
 }
 
@@ -133,19 +133,19 @@ const DCA_LEVEL_STYLE = {
 
 // Like TheatreMix: a cue with DCA assignments shows them on black (ensembles on gray);
 // a cue with none keeps its color across the row
-const ASSIGNED_DCA_BACKGROUND = "#0b0b0b";
-const ENSEMBLE_DCA_BACKGROUND = "#454545";
-const PLACEHOLDER_TEXT_COLOR = "#8a8a8a";   // a DCA label with no channels
-const SKIPPED_TEXT_COLOR = "#c08cf0";       // skipped cue (TheatreMix: purple italic, struck through)
+const ASSIGNED_DCA_BACKGROUND = themed('dcaAssigned');
+const ENSEMBLE_DCA_BACKGROUND = themed('dcaEnsemble');
+const PLACEHOLDER_TEXT_COLOR = themed('textFaint');   // a DCA label with no channels
+const SKIPPED_TEXT_COLOR = themed('skipped');         // skipped cue (TheatreMix: purple italic, struck through)
 
 // Typing into a cell (TheatreMix edits in a dark red box)
 const CELL_EDITOR_STYLE = {
 	width: '100%',
 	boxSizing: 'border-box',
-	backgroundColor: '#6a0000',
+	backgroundColor: themed('editing'),
 	color: TEXT_COLOR,
 	border: 'none',
-	outline: '2px solid #b33',
+	outline: `2px solid ${themed('editingOutline')}`,
 	font: 'inherit',
 	padding: 0,
 	textAlign: 'inherit',
@@ -156,9 +156,9 @@ const TOAST_STYLE = {
 	left: '50%',
 	bottom: 24,
 	transform: 'translateX(-50%)',
-	backgroundColor: '#5a1f1f',
+	backgroundColor: themed('toastError'),
 	color: TEXT_COLOR,
-	border: '1px solid #a44',
+	border: `1px solid ${themed('toastErrorBorder')}`,
 	borderRadius: 6,
 	padding: '8px 14px',
 	fontFamily: 'Arial',
@@ -167,10 +167,10 @@ const TOAST_STYLE = {
 	pointerEvents: 'none',
 }
 
-const TOAST_INFO_STYLE = {backgroundColor: '#1f3b5a', border: '1px solid #4a7fb5'};
+const TOAST_INFO_STYLE = {backgroundColor: themed('toastInfo'), border: `1px solid ${themed('toastInfoBorder')}`};
 
 // A marked cue (Action → Mark ... Cue): a red dot after its number
-const MARK_STYLE = {color: '#ff6b6b', fontSize: '0.6em', marginLeft: 4, verticalAlign: 'super'};
+const MARK_STYLE = {color: themed('mark'), fontSize: '0.6em', marginLeft: 4, verticalAlign: 'super'};
 
 // QLab cue number column (shown when the show recalls QLab cues)
 const QLAB_COLUMN_WIDTH = 70;
@@ -1196,7 +1196,7 @@ const Editor = ({showData, setShowData}) => {
 		return {
 			...sized(style),
 			...extra,
-			...(isSelected(row, col) ? {backgroundColor: SELECTED_COLOR, color: TEXT_COLOR} : {}),
+			...(isSelected(row, col) ? {backgroundColor: SELECTED_COLOR, color: ON_SELECTED_COLOR} : {}),
 			...(cut ? {textDecoration: 'line-through', opacity: 0.6} : {}),
 		};
 	}

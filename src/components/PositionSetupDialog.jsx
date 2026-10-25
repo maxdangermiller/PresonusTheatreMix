@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 
 import Dialog, { BUTTON_STYLE, INPUT_STYLE } from './Dialog.jsx';
-import { SELECTED_COLOR } from './utils/colors.jsx';
+import { SELECTED_COLOR, themed } from './utils/colors.jsx';
 
-const LIST_BOX_STYLE = {border: "1px solid #555", backgroundColor: "#141414", overflowY: "auto", height: 230, flexShrink: 0};
-const HEAD_STYLE = {textAlign: "left", fontWeight: "normal", fontSize: 13, opacity: 0.75, padding: "4px 8px", borderBottom: "1px solid #444", position: "sticky", top: 0, backgroundColor: "#141414"};
+const LIST_BOX_STYLE = {border: `1px solid ${themed('lineStrong')}`, backgroundColor: themed('panel'), overflowY: "auto", height: 230, flexShrink: 0};
+const HEAD_STYLE = {textAlign: "left", fontWeight: "normal", fontSize: 13, opacity: 0.75, padding: "4px 8px", borderBottom: `1px solid ${themed('line')}`, position: "sticky", top: 0, backgroundColor: themed('panel')};
 const CELL_STYLE = {padding: "3px 8px", fontSize: 14, whiteSpace: "nowrap"};
 
 const MAX_DELAY_MS = 250;

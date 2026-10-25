@@ -136,6 +136,16 @@ Like TheatreMix's DCA color coding, each assigned DCA's scribble strip shows wha
 
 With the show's **Dim DCA Faders** setting on, a DCA whose fader is at −∞ is dimmed (dim blue if "suppress colors" is also on, otherwise a darker version of its color), and changes back as soon as the fader comes up. Skipped cues are ignored when working out the next cue; after Line Checks the next cue is the first cue. Lines tagged `[DCACOLOR]` in the debug log show each color change and why.
 
+## Themes
+**Settings** (⌘,) → **Theme**, or **View → Theme**, changes the app's colors in every window straight away:
+- **Vivid (dark)**: the default, with bright cue highlight colors.
+- **Classic (dark)**: the app's original look, with muted cue highlight colors.
+- **Light**: light backgrounds with pastel cue colors.
+
+DCA state colors (green, cyan, yellow, magenta) mean the same in every theme, so they don't change; the Channel Utilisation grid stays white like TheatreMix's.
+
+**Custom themes:** Settings → **Themes Folder…** (or View → Theme → Open Themes Folder) opens a folder for your own themes, with a README. A theme is a `.json` file that names a base theme and lists only the colors it changes, e.g. `{"name": "My Theme", "base": "light", "colors": {"cueRed": "#ffb3b3"}}`. Every color a theme can set is listed, with what it's for, in `src/utils/themes.js`.
+
 ## Current and next cue on the console
 The console shows the cue that's running and the one coming next, in two places (Console Setup → **Cue Display**, both on by default):
 - **Cues on spare DCAs:** the two DCAs after the show's (DCAs 9 and 10 for a show on 1-8) show the current cue as `>1.1` and the next as `^1.2` (scribble strips only fit about 10 characters), so they sit beside the show's DCAs on the DCA layer. Only their names and colors are changed; their faders, mutes and channels are left alone. Turning it off names them `DCA 9` / `DCA 10` again.

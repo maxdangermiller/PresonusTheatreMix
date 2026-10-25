@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 import { is_ip_valid } from '../utils/ip_tools';
 
-import { TEXT_COLOR, SELECTED_COLOR } from './utils/colors.jsx';
+import { TEXT_COLOR, SELECTED_COLOR, ON_SELECTED_COLOR, themed } from './utils/colors.jsx';
 import MuteGroupButtons from './MuteGroupButtons.jsx';
 import DcaRecallOptions from './DcaRecallOptions.jsx';
 
@@ -16,7 +16,7 @@ const WINDOW_STYLE = {
     height: "100%",
     display: "flex",
     flexDirection: "column",
-    backgroundColor: "rgb(50, 50, 50)",
+    backgroundColor: themed('window'),
     color: TEXT_COLOR,
     fontFamily: "system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
     fontSize: 14,
@@ -31,8 +31,8 @@ const TITLE_BAR_STYLE = {
     fontSize: 15,
     fontWeight: 600,
     textAlign: "center",
-    backgroundColor: "rgb(43, 43, 43)",
-    borderBottom: "1px solid rgb(30, 30, 30)",
+    backgroundColor: themed('windowTitle'),
+    borderBottom: `1px solid ${themed('well')}`,
 };
 
 // Scrolls when the window is too short for everything (the buttons stay at the bottom)
@@ -50,8 +50,8 @@ const LIST_STYLE = {
     flex: 1,
     minHeight: 110,
     overflowY: "auto",
-    backgroundColor: "rgb(30, 30, 30)",
-    border: "1px solid rgb(30, 30, 30)",
+    backgroundColor: themed('well'),
+    border: `1px solid ${themed('line')}`,
 };
 
 const TABLE_STYLE = {
@@ -64,11 +64,11 @@ const TABLE_STYLE = {
 const HEADER_CELL_STYLE = {
     position: "sticky",
     top: 0,
-    backgroundColor: "rgb(43, 43, 43)",
+    backgroundColor: themed('windowTitle'),
     padding: "5px 8px",
     fontWeight: 600,
     fontSize: 13,
-    borderRight: "1px solid rgb(30, 30, 30)",
+    borderRight: `1px solid ${themed('line')}`,
     whiteSpace: "nowrap",
 };
 
@@ -89,7 +89,7 @@ const FOOTER_STYLE = {
 const BUTTON_GROUP_STYLE = {display: "flex", gap: "10px"};
 
 // Status column colors
-const STATUS_COLORS = {connected: "#3cc83c", connecting: "#e0a800"};
+const STATUS_COLORS = {connected: themed('ok'), connecting: themed('caution')};
 
 /**
  * Status column text for a device
@@ -340,7 +340,7 @@ const Settings = () => {
                                     <tr
                                         key={device.serial ?? index}
                                         style={{
-                                            backgroundColor: selRow == index ? SELECTED_COLOR : (index % 2 ? "rgb(43, 43, 43)" : "transparent"),
+                                            backgroundColor: selRow == index ? SELECTED_COLOR : (index % 2 ? themed('windowTitle') : "transparent"),
                                             cursor: "default",
                                         }}
                                         onClick={() => setSelRow(index)}
@@ -350,7 +350,7 @@ const Settings = () => {
                                         <td style={CELL_STYLE}>{device.serial}</td>
                                         <td style={CELL_STYLE}>{device.ip}</td>
                                         <td style={CELL_STYLE}>{device.port}</td>
-                                        <td style={{...CELL_STYLE, color: selRow == index ? TEXT_COLOR : deviceStatus.color}}>{deviceStatus.text}</td>
+                                        <td style={{...CELL_STYLE, color: selRow == index ? ON_SELECTED_COLOR : deviceStatus.color}}>{deviceStatus.text}</td>
                                     </tr>
                                 );
                             })}

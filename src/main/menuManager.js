@@ -18,6 +18,7 @@ import { openActiveCueWindow, exportNotes, clearMarks } from './cueInfo.js';
 import { getSettings, updateSettings, removeRecentFile, viewSettings } from './settings.js';
 import { getConsoleButtonReport, getLogAllConsoleMessages, setLogAllConsoleMessages } from './consoleButtons.js';
 import { getDebugLogPath } from './debugLog.js';
+import { getThemeState, setTheme, openThemesFolder } from './theme.js';
 
 const isMac = process.platform === 'darwin';
 
@@ -185,6 +186,7 @@ const handle_row_size = (rowSize) => {
 const buildTemplate = () => {
 	const {hasShow, isTmixp, qLabEnabled, canSave} = getShowState();
 	const {recentFiles, rowSize, fontSize, lockEditing, showPositions, colorBlindDca} = getSettings();
+	const themeState = getThemeState();
 
 	// Feature not in this app yet
 	const notImplemented = {enabled: false};
@@ -292,6 +294,19 @@ const buildTemplate = () => {
 					click: (item) => { updateSettings({showPositions: item.checked}); sendViewSettings(); } },
 				{ label: 'Color-Blind DCA Colors', type: 'checkbox', checked: colorBlindDca,
 					click: (item) => { updateSettings({colorBlindDca: item.checked}); sendViewSettings(); sync_channel_monitor(); } },
+				{
+					label: 'Theme',
+					submenu: [
+						...themeState.themes.map((theme) => ({
+							label: theme.name,
+							type: 'radio',
+							checked: themeState.id === theme.id,
+							click: () => { setTheme(theme.id); updateMenu(); },
+						})),
+						{ type: 'separator' },
+						{ label: 'Open Themes Folder', click: () => openThemesFolder() },
+					]
+				},
 				{
 					label: 'Row Size',
 					submenu: ['small', 'medium', 'large'].map((size) => ({

@@ -13,6 +13,7 @@ import { getMainWindow } from './windowManager.js';
 import { next_cue } from '../utils/dca_state.js';
 import { cue_key } from '../utils/show_edits.js';
 import { format_cue_number } from '../utils/cue_number.js';
+import { themeBackground } from './theme.js';
 
 /** Key of the active cue ("number.point"), or null for Line Checks / nothing fired */
 let activeKey = null;
@@ -70,7 +71,7 @@ const openActiveCueWindow = () => {
 		minWidth: 300,
 		minHeight: 120,
 		title: "Active Cue Info",
-		backgroundColor: "#1e1e1e",
+		backgroundColor: themeBackground(),
 		webPreferences: {preload: path.join(__dirname, 'preload.cjs')},
 	});
 	activeWindow.setMenuBarVisibility(false);

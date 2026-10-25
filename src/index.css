@@ -5,7 +5,7 @@
 }
 
 html {
-	/* Dark native controls and scrollbars, like TheatreMix */
+	/* Native controls and scrollbars: the theme sets this (dark like TheatreMix, or light) */
 	color-scheme: dark;
 }
 
@@ -18,8 +18,9 @@ body {
 	font-family:
 		-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
 		sans-serif;
-	background-color: #2a2a2a;
-	color: #fff;
+	/* Colors are the theme's (utils/themes.js, set on <html> as CSS variables) */
+	background-color: var(--background);
+	color: var(--text);
 }
 
 /* #region Toolbar */
@@ -35,16 +36,16 @@ body {
 	border: none;
 	border-radius: 6px;
 	background: none;
-	color: #fff;
+	color: var(--text);
 	cursor: pointer;
 }
 
 .toolbar-button:hover:not(:disabled) {
-	background-color: #555;
+	background-color: var(--hover);
 }
 
 .toolbar-button:active:not(:disabled) {
-	background-color: #666;
+	background-color: var(--pressed);
 }
 
 /* A greyed-out button lets the mouse through to its wrapper, so its tooltip still shows */
@@ -62,12 +63,12 @@ body {
 }
 
 .toolbar-button:focus-visible {
-	outline: 2px solid #005bd9;
+	outline: 2px solid var(--primary);
 	outline-offset: -2px;
 }
 
 .toolbar-button.toggled {
-	background-color: #5a5a5a;
+	background-color: var(--toggled);
 }
 
 /* #endregion */
@@ -80,40 +81,41 @@ body {
 	border: none;
 	border-radius: 5px;
 	font: inherit;
-	color: #fff;
-	background-color: rgb(70, 70, 70);
+	color: var(--text);
+	background-color: var(--button);
 	cursor: pointer;
 	-webkit-app-region: no-drag;
 }
 
 .dialog-button:hover:not(:disabled) {
-	background-color: rgb(85, 85, 85);
+	background-color: var(--button-hover);
 }
 
 .dialog-button:active:not(:disabled) {
-	background-color: rgb(110, 110, 110);
+	background-color: var(--button-pressed);
 }
 
 .dialog-button.primary {
-	background-color: rgb(20, 80, 175);
+	color: var(--on-primary);
+	background-color: var(--primary);
 }
 
 .dialog-button.primary:hover:not(:disabled) {
-	background-color: rgb(35, 110, 215);
+	filter: brightness(1.15);
 }
 
 .dialog-button.primary:active:not(:disabled) {
-	background-color: rgb(60, 135, 240);
+	filter: brightness(1.3);
 }
 
 .dialog-button:disabled {
 	cursor: default;
-	color: rgb(100, 100, 100);
-	background-color: rgb(40, 40, 40);
+	color: var(--button-disabled-text);
+	background-color: var(--button-disabled);
 }
 
 .dialog-button:focus-visible {
-	outline: 2px solid #005bd9;
+	outline: 2px solid var(--primary);
 	outline-offset: 2px;
 }
 

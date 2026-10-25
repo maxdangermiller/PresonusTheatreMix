@@ -9,9 +9,10 @@ import {
     BackIcon, GoIcon,
     ConsoleSetupIcon, QLabStatusIcon
 } from "./ToolbarIcons.jsx";
+import { themed } from "./utils/colors.jsx";
 
 const TOOLBAR_STYLE = {
-    backgroundColor: "#444444",
+    backgroundColor: themed('toolbar'),
     display: "flex",
     alignItems: "center",
     gap: "2px",
@@ -26,16 +27,16 @@ const DIVIDER_STYLE = {
     width: "1px",
     height: "30px",
     margin: "0 8px",
-    backgroundColor: "#5c5c5c",
+    backgroundColor: themed('toolbarDivider'),
 };
 
 const isMac = navigator.userAgent.includes("Mac");
 
 // QLab status light colors
-const QLAB_COLORS = {connected: "#3cc83c", connecting: "#9a9a9a"};
+const QLAB_COLORS = {connected: themed('ok'), connecting: themed('textFaint')};
 
 // Console Setup icon: green when connected (like TheatreMix), amber while (re)connecting
-const CONSOLE_COLORS = {connected: "#3cc83c", connecting: "#e0a800"};
+const CONSOLE_COLORS = {connected: themed('ok'), connecting: themed('caution')};
 
 /**
  * Tooltip for the Console Setup button
@@ -83,15 +84,15 @@ const TOOLTIP_STYLE = {
     position: "fixed",
     zIndex: 200,
     maxWidth: 300,
-    backgroundColor: "#1d1d1d",
-    color: "#fff",
-    border: "1px solid #5a5a5a",
+    backgroundColor: themed('tooltip'),
+    color: themed('text'),
+    border: `1px solid ${themed('tooltipBorder')}`,
     borderRadius: 6,
     padding: "6px 9px",
     fontFamily: "system-ui, -apple-system, Arial, sans-serif",
     fontSize: 13,
     lineHeight: 1.35,
-    boxShadow: "0 4px 14px rgba(0, 0, 0, 0.5)",
+    boxShadow: `0 4px 14px ${themed('shadow')}`,
     pointerEvents: "none",
 };
 
@@ -151,7 +152,7 @@ const ToolbarButton = ({label, keys, onClick, disabled = false, disabledReason, 
                 <div style={{...TOOLTIP_STYLE, left: tip.x, top: tip.y}} role="tooltip">
                     <b>{label}</b>{keys ? <span style={{opacity: 0.65, marginLeft: 8}}>{shortcut(keys)}</span> : null}
                     {tooltip ? <div style={{marginTop: 3, opacity: 0.85}}>{tooltip}</div> : null}
-                    {off && disabledReason ? <div style={{marginTop: 4, color: "#ffb86b"}}>{disabledReason}</div> : null}
+                    {off && disabledReason ? <div style={{marginTop: 4, color: themed('warn')}}>{disabledReason}</div> : null}
                 </div>
             ) : null}
         </span>

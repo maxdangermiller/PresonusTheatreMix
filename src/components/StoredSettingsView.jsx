@@ -1,6 +1,7 @@
 import React from 'react';
 
 import { UNITS, format_hz, format_db, eq_bands, eq_response } from '../utils/studiolive_units.js';
+import { themed } from './utils/colors.jsx';
 
 const GRAPH_W = 420;
 const GRAPH_H = 110;
@@ -24,13 +25,14 @@ const EqCurve = ({eq}) => {
 		points.push(`${x_of(hz).toFixed(1)},${y_of(eq_response(eq, hz)).toFixed(1)}`);
 	}
 	return (
-		<svg width={GRAPH_W} height={GRAPH_H} style={{backgroundColor: "#0d0d0d", border: "1px solid #444"}} role="img" aria-label="EQ curve">
-			{[100, 1000, 10000].map((hz) => <line key={hz} x1={x_of(hz)} x2={x_of(hz)} y1={0} y2={GRAPH_H} stroke="#2c2c2c"/>)}
-			{[-10, 0, 10].map((db) => <line key={db} x1={0} x2={GRAPH_W} y1={y_of(db)} y2={y_of(db)} stroke={db === 0 ? "#444" : "#2c2c2c"}/>)}
-			{[[100, "100"], [1000, "1k"], [10000, "10k"]].map(([hz, t]) => <text key={hz} x={x_of(hz) + 3} y={GRAPH_H - 4} fill="#777" fontSize="10">{t}</text>)}
-			<polyline points={points.join(" ")} fill="none" stroke={eq.on ? "#4fc3f7" : "#7a7a7a"} strokeWidth="2" strokeDasharray={eq.on ? undefined : "5 4"}/>
-			{eq.bands.filter((b) => b.on).map((b) => <circle key={b.band} cx={x_of(b.hz)} cy={y_of(b.db)} r="3.5" fill={eq.on ? "#fff" : "#888"}/>)}
-			{eq.on ? null : <text x={GRAPH_W - 6} y={14} fill="#aaa" fontSize="11" textAnchor="end">EQ is off</text>}
+		<svg width={GRAPH_W} height={GRAPH_H} style={{backgroundColor: themed('graph'), border: `1px solid ${themed('line')}`}} role="img" aria-label="EQ curve">
+			{/* Theme colors go in style: SVG color attributes don't take CSS variables */}
+			{[100, 1000, 10000].map((hz) => <line key={hz} x1={x_of(hz)} x2={x_of(hz)} y1={0} y2={GRAPH_H} style={{stroke: themed('graphGrid')}}/>)}
+			{[-10, 0, 10].map((db) => <line key={db} x1={0} x2={GRAPH_W} y1={y_of(db)} y2={y_of(db)} style={{stroke: themed(db === 0 ? 'line' : 'graphGrid')}}/>)}
+			{[[100, "100"], [1000, "1k"], [10000, "10k"]].map(([hz, t]) => <text key={hz} x={x_of(hz) + 3} y={GRAPH_H - 4} style={{fill: themed('textFaint')}} fontSize="10">{t}</text>)}
+			<polyline points={points.join(" ")} fill="none" style={{stroke: eq.on ? themed('graphLine') : themed('textFaint')}} strokeWidth="2" strokeDasharray={eq.on ? undefined : "5 4"}/>
+			{eq.bands.filter((b) => b.on).map((b) => <circle key={b.band} cx={x_of(b.hz)} cy={y_of(b.db)} r="3.5" style={{fill: eq.on ? themed('text') : themed('textFaint')}}/>)}
+			{eq.on ? null : <text x={GRAPH_W - 6} y={14} style={{fill: themed('textMuted')}} fontSize="11" textAnchor="end">EQ is off</text>}
 		</svg>
 	);
 }

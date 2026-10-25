@@ -11,6 +11,7 @@ import {syncReaper, reaperCueFired} from './main/reaper.js';
 import {syncConsoleButtons, setButtonActionHandler, buttonEvents, effectiveButtonMap, serializeButtonMap, getButtonSetup} from './main/consoleButtons.js';
 
 import {handle_open_file} from './main/fileManager.js';
+import {getThemeState, setTheme, themeBackground, openThemesFolder} from './main/theme.js';
 import {initMenu, updateMenu, sendViewSettings, sendMenuAction, setLockEditing, setEditorSelection, handleNewShow} from './main/menuManager.js';
 import {getSettings, updateSettings, viewSettings, clean_font_size, clean_column_widths, MAIN_LABEL_CHOICES} from './main/settings.js';
 import fs from 'node:fs';
@@ -179,6 +180,11 @@ ipcMain.handle('app:get_view_settings', async () => {
 	return viewSettings();
 });
 
+// Theme engine (main/theme.js): the chosen theme's colors, picking one, custom themes' folder
+ipcMain.handle('theme:get', async () => getThemeState());
+ipcMain.handle('theme:set', async (_, id) => { const state = setTheme(String(id)); updateMenu(); return state; });
+ipcMain.handle('theme:open_folder', async () => { openThemesFolder(); });
+
 ipcMain.handle('electronAPI:openFile', handle_open_file);
 // ipcMain.handle('electronAPI:openErrorDialog', (_, msg) => open_dialog(msg));
 
@@ -195,6 +201,8 @@ const createWindow = () => {
 		// Keeps the whole toolbar visible
 		minWidth: 900,
 		minHeight: 500,
+		// The theme's background, so the window doesn't flash another color while it loads
+		backgroundColor: themeBackground(),
 		
 		icon: path.join(__dirname, '../build/icons/icon1028.png'),
 
@@ -256,6 +264,7 @@ const createWindow = () => {
 					minimizable: false,
 					maximizable: false,
 					frame: false, // Set to false for a frameless popup
+					backgroundColor: themeBackground(),
 					parent: mainWindow,
 					webPreferences: {
 						// Inherit or inject custom preloads if necessary

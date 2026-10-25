@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
 import Dialog, { BUTTON_STYLE, INPUT_STYLE } from './Dialog.jsx';
-import { SELECTED_COLOR, BORDER_COLOR } from './utils/colors.jsx';
+import { SELECTED_COLOR, BORDER_COLOR, themed } from './utils/colors.jsx';
 import StoredSettingsView from './StoredSettingsView.jsx';
 import { parse_channels, parse_map, serialize_map, SETTING_SECTIONS, profile_flags, with_profile_flags } from '../utils/show_edits.js';
 
@@ -15,15 +15,15 @@ const ALL_DCAS = 24;
 const TABS = ['Channels & DCAs', 'Levels', 'QLab', 'REAPER', 'Console'];
 const ENSEMBLE_CHOICES = ['', 'Male', 'Female'];
 
-const TAB_STYLE = (on) => ({...BUTTON_STYLE, borderRadius: 0, padding: "4px 14px", fontSize: 14, backgroundColor: on ? SELECTED_COLOR : "transparent", borderColor: on ? SELECTED_COLOR : "#6c757d"});
+const TAB_STYLE = (on) => ({...BUTTON_STYLE, borderRadius: 0, padding: "4px 14px", fontSize: 14, backgroundColor: on ? SELECTED_COLOR : "transparent", borderColor: on ? SELECTED_COLOR : themed('buttonBorder')});
 // The channel table fills the window's spare height and is the only thing that scrolls
-const TABLE_BOX_STYLE = {border: "1px solid #555", backgroundColor: "#141414", overflowY: "auto", flex: 1, minHeight: 120};
+const TABLE_BOX_STYLE = {border: `1px solid ${themed('lineStrong')}`, backgroundColor: themed('panel'), overflowY: "auto", flex: 1, minHeight: 120};
 // The other tabs: a column of settings that scrolls on its own if the window is short
 const TAB_PAGE_STYLE = {display: "flex", flexDirection: "column", gap: 14, padding: "8px 20px", overflowY: "auto", minHeight: 0};
 const ROW_BUTTON_STYLE = {...BUTTON_STYLE, whiteSpace: "nowrap", fontSize: 14, padding: "0.3rem 0.6rem"};
 // Never squeezed out of view: it takes up to half the tab and scrolls past that
-const STORED_BOX_STYLE = {border: "1px solid #444", borderRadius: 4, padding: "8px 10px", flexShrink: 0, maxHeight: "50%", overflow: "auto"};
-const HEAD_STYLE = {textAlign: "left", fontWeight: "normal", fontSize: 13, color: "#b5b5b5", padding: "4px 6px", borderBottom: "1px solid #444", position: "sticky", top: 0, backgroundColor: "#141414", zIndex: 1};
+const STORED_BOX_STYLE = {border: `1px solid ${themed('line')}`, borderRadius: 4, padding: "8px 10px", flexShrink: 0, maxHeight: "50%", overflow: "auto"};
+const HEAD_STYLE = {textAlign: "left", fontWeight: "normal", fontSize: 13, color: themed('textMuted'), padding: "4px 6px", borderBottom: `1px solid ${themed('line')}`, position: "sticky", top: 0, backgroundColor: themed('panel'), zIndex: 1};
 const CELL_STYLE = {padding: "1px 4px", fontSize: 14};
 const SMALL_INPUT = {...INPUT_STYLE, padding: "1px 4px", fontSize: 14, width: "100%", boxSizing: "border-box"};
 const NOTE_STYLE = {fontSize: 13, opacity: 0.7, margin: "2px 0 0 26px"};
@@ -65,7 +65,7 @@ const LiveSettings = ({channel}) => {
 	if (!live) return <div style={{fontSize: 13, opacity: 0.6}}>Reading the console…</div>;
 	if (!live.ok) return <div style={{fontSize: 13, opacity: 0.6}}>Nothing stored yet, and the console isn't connected to show what's on it now.</div>;
 	return <>
-		<div style={{fontSize: 13, color: "#ffb86b", marginBottom: 6}}>Nothing stored yet. This is line {channel} on the console now; Store from console saves it.</div>
+		<div style={{fontSize: 13, color: themed('warn'), marginBottom: 6}}>Nothing stored yet. This is line {channel} on the console now; Store from console saves it.</div>
 		<StoredSettingsView settings={live.settings}/>
 	</>;
 }

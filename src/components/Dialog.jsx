@@ -1,11 +1,11 @@
 import React, { useEffect, useRef } from 'react';
 
-import { BACKGROUND_COLOR, BORDER_COLOR, HEADER_COLOR, TEXT_COLOR, SELECTED_COLOR } from './utils/colors.jsx';
+import { BACKGROUND_COLOR, BORDER_COLOR, HEADER_COLOR, TEXT_COLOR, PRIMARY_COLOR, ON_PRIMARY_COLOR, themed } from './utils/colors.jsx';
 
 const OVERLAY_STYLE = {
 	position: "fixed",
 	inset: 0,
-	backgroundColor: "rgba(0, 0, 0, 0.6)",
+	backgroundColor: themed('overlay'),
 	display: "flex",
 	justifyContent: "center",
 	alignItems: "center",
@@ -18,7 +18,7 @@ const DIALOG_STYLE = {
 	border: "2px solid " + BORDER_COLOR,
 	borderRadius: "8px",
 	fontFamily: "Arial",
-	boxShadow: "0 10px 30px rgba(0, 0, 0, 0.5)",
+	boxShadow: `0 10px 30px ${themed('shadow')}`,
 	overflow: "hidden",
 	display: "flex",
 	flexDirection: "column",
@@ -56,7 +56,7 @@ const BUTTON_STYLE = {
 	fontSize: "1rem",
 	color: TEXT_COLOR,
 	backgroundColor: "transparent",
-	border: "1px solid #6c757d",
+	border: `1px solid ${themed('buttonBorder')}`,
 	borderRadius: "0.375rem",
 	padding: "0.375rem 0.75rem",
 	cursor: "pointer"
@@ -64,21 +64,22 @@ const BUTTON_STYLE = {
 
 const PRIMARY_BUTTON_STYLE = {
 	...BUTTON_STYLE,
-	backgroundColor: SELECTED_COLOR,
-	borderColor: SELECTED_COLOR
+	color: ON_PRIMARY_COLOR,
+	backgroundColor: PRIMARY_COLOR,
+	borderColor: PRIMARY_COLOR
 }
 
 // Text inputs / selects inside dialogs
 const INPUT_STYLE = {
 	fontSize: 15,
 	padding: "4px 6px",
-	backgroundColor: "#1b1b1b",
+	backgroundColor: themed('input'),
 	color: TEXT_COLOR,
-	border: "1px solid #555",
+	border: `1px solid ${themed('lineStrong')}`,
 	borderRadius: "4px",
 }
 
-const ERROR_STYLE = {minHeight: "1.2em", fontSize: 13, color: "#ff8a8a"}
+const ERROR_STYLE = {minHeight: "1.2em", fontSize: 13, color: themed('error')}
 
 /**
  * @typedef {Object} DialogProps

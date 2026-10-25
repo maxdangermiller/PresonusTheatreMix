@@ -150,6 +150,14 @@ contextBridge.exposeInMainWorld('qlabApi', {
 	onStatus: (callback) => subscribe('qlab-status', callback),
 });
 
+// Theme engine: {id, colors: {name: css color}, themes: [{id, name, custom}]}
+contextBridge.exposeInMainWorld('themeApi', {
+	get: () => ipcRenderer.invoke('theme:get'),
+	set: (id) => ipcRenderer.invoke('theme:set', id),
+	openFolder: () => ipcRenderer.invoke('theme:open_folder'),
+	onChange: (callback) => subscribe('theme-changed', callback),
+});
+
 contextBridge.exposeInMainWorld('menuApi', {
 	// Menu commands handled in the renderer: go, back, jump, jump-selected, undo, redo, console-setup
 	onMenuAction: (callback) => subscribe('menu-action', callback),

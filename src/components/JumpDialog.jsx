@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-import { BACKGROUND_COLOR, BORDER_COLOR, HEADER_COLOR, TEXT_COLOR, SELECTED_COLOR } from './utils/colors.jsx';
+import { BACKGROUND_COLOR, BORDER_COLOR, HEADER_COLOR, TEXT_COLOR, PRIMARY_COLOR, ON_PRIMARY_COLOR, themed } from './utils/colors.jsx';
 
 const OVERLAY_STYLE = {
 	position: "fixed",
 	inset: 0,
-	backgroundColor: "rgba(0, 0, 0, 0.6)",
+	backgroundColor: themed('overlay'),
 	display: "flex",
 	justifyContent: "center",
 	alignItems: "center",
@@ -19,7 +19,7 @@ const DIALOG_STYLE = {
 	borderRadius: "8px",
 	width: "320px",
 	fontFamily: "Arial",
-	boxShadow: "0 10px 30px rgba(0, 0, 0, 0.5)",
+	boxShadow: `0 10px 30px ${themed('shadow')}`,
 	overflow: "hidden"
 }
 
@@ -28,7 +28,7 @@ const BUTTON_STYLE = {
 	fontSize: "1rem",
 	color: TEXT_COLOR,
 	backgroundColor: "transparent",
-	border: "1px solid #6c757d",
+	border: `1px solid ${themed('buttonBorder')}`,
 	borderRadius: "0.375rem",
 	padding: "0.375rem 0.75rem",
 	cursor: "pointer"
@@ -90,12 +90,12 @@ const JumpDialog = ({onJump, onCancel}) => {
 						style={{fontSize: 18, padding: "6px"}}
 						aria-label="Cue number"
 					/>
-					<div style={{minHeight: "1.2em", fontSize: 13, color: "#ff8a8a"}}>{error}</div>
+					<div style={{minHeight: "1.2em", fontSize: 13, color: themed('error')}}>{error}</div>
 				</div>
 
 				<div style={{display: "flex", justifyContent: "flex-end", gap: "10px", padding: "12px 16px", borderTop: "1px solid " + BORDER_COLOR}}>
 					<button style={BUTTON_STYLE} onClick={onCancel}>Cancel</button>
-					<button style={{...BUTTON_STYLE, backgroundColor: SELECTED_COLOR, borderColor: SELECTED_COLOR}} onClick={submit}>Jump</button>
+					<button style={{...BUTTON_STYLE, color: ON_PRIMARY_COLOR, backgroundColor: PRIMARY_COLOR, borderColor: PRIMARY_COLOR}} onClick={submit}>Jump</button>
 				</div>
 			</div>
 		</div>

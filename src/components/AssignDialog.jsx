@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
 import Dialog, { BUTTON_STYLE, INPUT_STYLE } from './Dialog.jsx';
-import { SELECTED_COLOR, BORDER_COLOR } from './utils/colors.jsx';
+import { SELECTED_COLOR, BORDER_COLOR, themed } from './utils/colors.jsx';
 import {
 	MIN_OFFSET, MAX_OFFSET, read_dca, cue_channel_dcas, default_position, default_profile, ensemble_channels,
 } from '../utils/show_edits.js';
@@ -9,8 +9,8 @@ import { MIN_DCA_LEVEL, MAX_DCA_LEVEL, clamp_dca_level } from '../utils/dca_leve
 import { format_cue_number } from '../utils/cue_number.js';
 
 const LIST_STYLE = {
-	border: "1px solid #555",
-	backgroundColor: "#141414",
+	border: `1px solid ${themed('lineStrong')}`,
+	backgroundColor: themed('panel'),
 	overflowY: "auto",
 	height: 320,
 	fontSize: 15,
@@ -18,7 +18,7 @@ const LIST_STYLE = {
 
 const ROW_STYLE = {padding: "3px 8px", cursor: "default", whiteSpace: "nowrap", userSelect: "none"}
 
-const TABLE_HEAD_STYLE = {textAlign: "left", fontWeight: "normal", fontSize: 13, opacity: 0.75, padding: "4px 6px", borderBottom: "1px solid #444", position: "sticky", top: 0, backgroundColor: "#141414"}
+const TABLE_HEAD_STYLE = {textAlign: "left", fontWeight: "normal", fontSize: 13, opacity: 0.75, padding: "4px 6px", borderBottom: `1px solid ${themed('line')}`, position: "sticky", top: 0, backgroundColor: themed('panel')}
 
 const COLUMN_STYLE = {display: "flex", flexDirection: "column", gap: "8px"}
 
@@ -267,7 +267,7 @@ const AssignDialog = ({show, cue, dca, onSave, onCancel}) => {
 											const offset = Math.round(Math.min(MAX_OFFSET, Math.max(MIN_OFFSET, moved.db)) * 10) / 10;
 											return (
 												<button
-													style={{...BUTTON_STYLE, fontSize: 13, padding: "0 6px", color: "#ffb86b", borderColor: "#ffb86b"}}
+													style={{...BUTTON_STYLE, fontSize: 13, padding: "0 6px", color: themed('warn'), borderColor: themed('warn')}}
 													onClick={(e) => { e.stopPropagation(); update(i.ch, {offset}); setOffsetsOn(true); }}
 													title={`Channel ${moved.line}'s fader has been moved on the console. Click to keep ${fmt(offset)} dB as this line's offset in this cue.`}
 													aria-label={`Keep fader ${fmt(moved.db)} dB as the offset`}

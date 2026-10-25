@@ -1,6 +1,6 @@
 import React from 'react';
 
-import { TEXT_COLOR } from './utils/colors.jsx';
+import { TEXT_COLOR, themed } from './utils/colors.jsx';
 
 // StudioLive Console Setup: which mute group buttons act as Go / Back.
 // Laid out like TheatreMix's "Mute Group Buttons" tab (a grid of buttons with a
@@ -9,7 +9,7 @@ import { TEXT_COLOR } from './utils/colors.jsx';
 
 const BOX_STYLE = {
     flex: "none",
-    border: "1px solid rgb(130, 135, 144)",
+    border: `1px solid ${themed('groupBorder')}`,
     borderRadius: "4px",
     padding: "14px 14px 12px",
     position: "relative",
@@ -20,7 +20,7 @@ const BOX_TITLE_STYLE = {
     top: "-9px",
     left: "12px",
     padding: "0 6px",
-    backgroundColor: "rgb(50, 50, 50)",
+    backgroundColor: themed('window'),
     fontSize: 13,
     fontWeight: 600,
 };
@@ -32,9 +32,9 @@ const GRID_STYLE = {
 };
 
 const CELL_STYLE = {
-    border: "1px solid rgb(30, 30, 30)",
+    border: `1px solid ${themed('line')}`,
     borderRadius: "4px",
-    backgroundColor: "rgb(60, 60, 60)",
+    backgroundColor: themed('button'),
     padding: "8px",
     display: "flex",
     flexDirection: "column",
@@ -49,16 +49,16 @@ const SELECT_STYLE = {
     fontSize: 13,
     padding: "2px",
     color: TEXT_COLOR,
-    backgroundColor: "rgb(30, 30, 30)",
-    border: "1px solid rgb(130, 135, 144)",
+    backgroundColor: themed('input'),
+    border: `1px solid ${themed('groupBorder')}`,
     borderRadius: "3px",
 };
 
 const NOTE_STYLE = {fontSize: 11, lineHeight: 1.3, minHeight: "2.6em"};
 
 // Flash colors: green = fired an action, blue = pressed but not mapped
-const FLASH_FIRED = "rgb(40, 120, 40)";
-const FLASH_PRESSED = "rgb(30, 70, 140)";
+const FLASH_FIRED = themed('flashFired');
+const FLASH_PRESSED = themed('flashPressed');
 
 /**
  * @typedef {Object} MuteGroupButtonsProps
@@ -114,7 +114,7 @@ const MuteGroupButtons = ({setup, pending, onChange, flashes}) => {
                             key={group}
                             style={{
                                 ...CELL_STYLE,
-                                ...(flash ? {backgroundColor: flash.fired ? FLASH_FIRED : FLASH_PRESSED, borderColor: "#fff"} : {}),
+                                ...(flash ? {backgroundColor: flash.fired ? FLASH_FIRED : FLASH_PRESSED, borderColor: themed('text')} : {}),
                                 opacity: enabled ? 1 : 0.5,
                             }}
                             data-group={group}
@@ -139,11 +139,11 @@ const MuteGroupButtons = ({setup, pending, onChange, flashes}) => {
 
                             <div style={NOTE_STYLE}>
                                 {members === null ? <span style={{opacity: 0.5}}>—</span>
-                                    : members.length === 0 ? <span style={{color: "#7fd07f"}}>Empty</span>
+                                    : members.length === 0 ? <span style={{color: themed('ok')}}>Empty</span>
                                     : action !== undefined
-                                        ? <span style={{color: "#e0a800"}}>⚠ Also mutes ch {membersText}</span>
+                                        ? <span style={{color: themed('caution')}}>⚠ Also mutes ch {membersText}</span>
                                         : <span style={{opacity: 0.6}}>Ch {membersText}</span>}
-                                {unsupported && <div style={{color: "#e0a800"}}>Not supported yet</div>}
+                                {unsupported && <div style={{color: themed('caution')}}>Not supported yet</div>}
                             </div>
                         </div>
                     );

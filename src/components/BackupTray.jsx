@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from 'react';
 
 import { INPUT_STYLE } from './Dialog.jsx';
-import { BORDER_COLOR } from './utils/colors.jsx';
+import { BORDER_COLOR, themed } from './utils/colors.jsx';
 
 const TRAY_STYLE = {
 	display: "flex",
 	alignItems: "center",
 	gap: 18,
 	padding: "6px 12px",
-	backgroundColor: "#000",
+	backgroundColor: themed('cueList'),
 	border: "1px solid " + BORDER_COLOR,
 	borderTop: "none",
 	fontFamily: "Arial",
@@ -18,8 +18,8 @@ const TRAY_STYLE = {
 	userSelect: "none",
 }
 
-const ACTIVE = {color: "#3ddc5a", fontWeight: "bold"};
-const STANDBY = {color: "#777"};
+const ACTIVE = {color: themed('ok'), fontWeight: "bold"};
+const STANDBY = {color: themed('textFaint')};
 
 /**
  * The backup tray under the cue list (TheatreMix): each channel with a backup, the one carrying

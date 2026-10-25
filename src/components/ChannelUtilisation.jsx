@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
 import Dialog, { BUTTON_STYLE, PRIMARY_BUTTON_STYLE, INPUT_STYLE } from './Dialog.jsx';
-import { SELECTED_COLOR } from './utils/colors.jsx';
 import { get_DCA_label } from './utils/cue_utils.js';
 import { cue_key, cue_value, dca_field, parse_channels, controlled_channels, default_profile, read_dca, MAX_DCAS } from '../utils/show_edits.js';
 import { format_cue_number } from '../utils/cue_number.js';
+import { themed } from './utils/colors.jsx';
 
-const GRID_BOX_STYLE = {border: "1px solid #555", backgroundColor: "#fafafa", color: "#111", overflow: "auto", flex: 1, minHeight: 300, height: "68vh"};
+const GRID_BOX_STYLE = {border: `1px solid ${themed('lineStrong')}`, backgroundColor: "#fafafa", color: "#111", overflow: "auto", flex: 1, minHeight: 300, height: "68vh"};
 const HEAD_STYLE = {position: "sticky", top: 0, backgroundColor: "#f0f0f0", fontSize: 12, fontWeight: "bold", padding: "4px 8px", borderRight: "1px solid #ddd", borderBottom: "1px solid #ccc", whiteSpace: "nowrap", textAlign: "center", zIndex: 1, cursor: "pointer"};
 const CHANNEL_STYLE = {position: "sticky", left: 0, backgroundColor: "#ececec", fontSize: 12, fontWeight: "bold", padding: "3px 8px", whiteSpace: "nowrap", borderBottom: "1px solid #ddd", zIndex: 1};
 const CELL_STYLE = {fontSize: 12, padding: "3px 8px", whiteSpace: "nowrap", textAlign: "center", borderRight: "1px solid #eee", borderBottom: "1px solid #eee"};
@@ -110,7 +110,7 @@ const MoveAssignments = ({show, cues, runEdit, onDone}) => {
 					<button style={PRIMARY_BUTTON_STYLE} disabled={!todo.length || from === to} onClick={() => { setLog([]); setRun(todo.map(cue_key)); setStep(0); }}>Start</button>
 					<button style={BUTTON_STYLE} onClick={onDone}>Back to the timeline</button>
 				</div>
-				: current && <div style={{border: "1px solid #555", borderRadius: 6, padding: 12, display: "flex", flexDirection: "column", gap: 10}}>
+				: current && <div style={{border: `1px solid ${themed('lineStrong')}`, borderRadius: 6, padding: 12, display: "flex", flexDirection: "column", gap: 10}}>
 					<div style={{fontSize: 18}}>
 						Cue {format_cue_number(current.number, current.point)} — {current.name} ({step + 1} of {run.length})
 					</div>
@@ -170,7 +170,7 @@ const ChannelUtilisation = ({show, activeKey, runEdit, onSelectCue, onClose}) =>
 								{cues.map((c) => (
 									<th
 										key={cue_key(c)}
-										style={{...HEAD_STYLE, color: cue_key(c) === activeKey ? SELECTED_COLOR : "#111"}}
+										style={{...HEAD_STYLE, color: cue_key(c) === activeKey ? "#005bd9" : "#111"}}
 										onClick={() => onSelectCue(cue_key(c))}
 										title="Select this cue in the cue list"
 									>

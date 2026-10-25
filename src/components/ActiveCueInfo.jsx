@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 
-import { get_cue_color, ACTIVE_CUE_ACCENT, TEXT_COLOR } from './utils/colors.jsx';
+import { get_cue_color, ACTIVE_CUE_ACCENT, TEXT_COLOR, themed } from './utils/colors.jsx';
 
 const DEFAULT_SIZE = 48;
 const SIZE_KEY = 'activeCueInfo.fontSize';
@@ -8,7 +8,7 @@ const SIZE_KEY = 'activeCueInfo.fontSize';
 const PAGE_STYLE = {
 	height: "100vh",
 	boxSizing: "border-box",
-	backgroundColor: "#1e1e1e",
+	backgroundColor: themed('well'),
 	color: TEXT_COLOR,
 	fontFamily: "Arial",
 	padding: "12px 20px",
@@ -55,7 +55,7 @@ const ActiveCueInfo = () => {
 			<div style={{...LINE_STYLE, borderLeft: `0.15em solid ${ACTIVE_CUE_ACCENT}`, paddingLeft: "0.4em", backgroundColor: current ? get_cue_color(current.colour) : "transparent"}}>
 				<b>{current?.number ?? "0"}</b>
 				<span>{current?.name ?? "Line Checks"}</span>
-				{info?.marked ? <span style={{fontSize: "0.4em", color: "#ff8a8a"}}>● marked</span> : null}
+				{info?.marked ? <span style={{fontSize: "0.4em", color: themed('error')}}>● marked</span> : null}
 			</div>
 			<div style={{...LINE_STYLE, fontSize: "0.55em", opacity: 0.7}}>
 				<span>Next:</span>

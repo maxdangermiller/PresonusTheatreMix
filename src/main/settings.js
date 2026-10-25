@@ -27,6 +27,8 @@ const DEFAULTS = {
 	rowSize: 'medium',
 	/** @type {Number | null} Settings → cue list font size (px); null: the Row Size preset's */
 	fontSize: null,
+	/** Settings → Theme: a built-in theme's id ('vivid', 'classic', 'light') or 'custom:<file name>' */
+	theme: 'vivid',
 	/** @type {Object<string, number>} cue list column widths (px) dragged by the user: 'cue', 'text', 'qlab', 'dca1'... */
 	columnWidths: {},
 	/** View → Positions: position codes in the cue list's DCA cells */
@@ -77,6 +79,7 @@ function getSettings() {
 		for (const key of BOOLEAN_SETTINGS) {
 			if (typeof saved[key] === 'boolean') settings[key] = saved[key];
 		}
+		if (typeof saved.theme === 'string' && saved.theme) settings.theme = saved.theme;
 		if (MAIN_LABEL_CHOICES.includes(saved.cueOnMain)) settings.cueOnMain = saved.cueOnMain;
 		if (typeof saved.lastConsole?.host === 'string') settings.lastConsole = saved.lastConsole;
 	} catch {
