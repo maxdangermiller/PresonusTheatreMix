@@ -12,9 +12,9 @@ contextBridge.exposeInMainWorld('presonus', {
 		ipcRenderer.removeAllListeners('presonus:device-found'),
 
 	// name: console name from discovery, shown in the status tooltip; serial: remembered
-	// so the app can find this console again on launch (auto-connect)
-  	connect: (host, port, name, serial) =>
-	  	ipcRenderer.invoke('presonus:connect', { host, port, name, serial }),
+	// so the app can find this console again on launch (auto-connect); kind: 'studiolive' | 'x32'
+  	connect: (host, port, name, serial, kind) =>
+	  	ipcRenderer.invoke('presonus:connect', { host, port, name, serial, kind }),
 
 	// {state: 'disconnected' | 'connecting' | 'connected', host?, name?, message?}
 	getStatus: () =>
@@ -148,6 +148,19 @@ contextBridge.exposeInMainWorld('qlabApi', {
 	// {state: 'off' | 'connecting' | 'connected', workspace?, message?}
 	getStatus: () => ipcRenderer.invoke('qlab:get_status'),
 	onStatus: (callback) => subscribe('qlab-status', callback),
+});
+
+// The show's script: choose() -> path | null; read(path) -> {ok, bytes, file} | {ok: false, error};
+// saveAnnotated(bytes, name) -> saved path | null
+contextBridge.exposeInMainWorld('scriptApi', {
+	choose: () => ipcRenderer.invoke('script:choose'),
+	read: (file) => ipcRenderer.invoke('script:read', file),
+	saveAnnotated: (bytes, name) => ipcRenderer.invoke('script:save_annotated', {bytes, name}),
+	// Scanned pages' text (macOS): {ok, pages: {n: {width, height, lines: [{x, y, width, height, text}]}}}
+	ocr: (file, pages) => ipcRenderer.invoke('script:ocr', {file, pages}),
+	onOcrProgress: (callback) => subscribe('script-ocr-progress', callback),
+	// Pages already read, and keeping pages read with Tesseract: (file, pages, store?) -> {ok, pages}
+	ocrCache: (file, pages, store) => ipcRenderer.invoke('script:ocr_cache', {file, pages, store}),
 });
 
 // Theme engine: {id, colors: {name: css color}, themes: [{id, name, custom}]}

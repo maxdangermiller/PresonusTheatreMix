@@ -24,6 +24,12 @@ const OPTIONS = [
         label: "Back restores DCAs",
         note: "Going Back into a cue puts its DCA faders and mutes back as they were when you left it. Off: Back fires the cue like Go.",
     },
+    {
+        key: 'newDcaClosed',
+        label: "New DCAs start closed",
+        note: "A DCA coming up for the first time starts at -∞ instead of -20 dB, so a mic is only open once you push it up for the line (line-by-line mixing).",
+        default: false,
+    },
 ];
 
 // Console Setup → Cue Display: the current and next cue shown on the console
@@ -74,11 +80,11 @@ const OptionBox = ({title, options, values, onChange, children}) => (
         <div style={BOX_TITLE_STYLE}>{title}</div>
 
         <div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px"}}>
-            {options.map(({key, label, note}) => (
+            {options.map(({key, label, note, default: on = true}) => (
                 <label key={key} style={OPTION_STYLE}>
                     <input
                         type="checkbox"
-                        checked={values?.[key] ?? true}
+                        checked={values?.[key] ?? on}
                         disabled={values === null}
                         onChange={(e) => onChange({...values, [key]: e.target.checked})}
                         style={{marginTop: "3px"}}

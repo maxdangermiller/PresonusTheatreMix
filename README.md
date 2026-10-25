@@ -55,6 +55,25 @@ npm start
 npx patch-package @featherbear/presonus-studiolive-api
 ```
 
+## Behringer X32 / Midas M32
+The app also runs a Behringer X32 (or Midas M32) over its OSC remote protocol (UDP port 10023). Console Setup finds X32s on the network along with StudioLives (they're listed with their model, e.g. "X32"), and **Connect automatically** reconnects to whichever was used last.
+
+Everything works the same as on a StudioLive: DCA assignments, names and colors (the nearest of the X32's eight colors; dim colors use the inverted version), DCA levels and mutes, line faders and offsets, muting lines not on a DCA, backup channels (a DCA's mute button), mute group buttons as Go / Back (the X32 has 6 mute groups), channel monitoring from the input meters, and the main fader's label for the current / next cue. The X32's 8 DCAs are all the show's, so there are no spare DCAs for the cue display, and it has no Scenes-screen title or User Layer.
+
+Names are cut to the X32's 12 characters. Faders are converted through dB between the two consoles' fader laws, so a level in the show means the same dB on either.
+
+**Stored channel settings** are kept in the same units as on a StudioLive, so they work on either console: preamp gain (the channel's own local input, `headamp` = channel − 1), HPF (X32 range 20–400 Hz), EQ on, the four bands' type (shelf / peaking), frequency, gain and Q, compressor on and threshold, gate on and threshold. The X32 has nothing to match the StudioLive's digital gain, EQ band on/off, compressor ratio / attack / release / knee, or limiter, so those aren't stored or sent on an X32. Values outside the other console's range are clamped (e.g. an X32 EQ Q of 5 is stored as the StudioLive's maximum, 4).
+
+**Testing without an X32**, two ways:
+- **The full X32 emulator, with X32-Edit** (best): Patrick-Gilles Maillot's emulator knows every X32 parameter, and Behringer's X32-Edit (and M32-Edit) connect to it, so you can watch the app drive the "console" live.
+  1. Build it once: `sim/build_x32_emulator.sh` (downloads its source into `sim/x32-emulator/`, which git ignores, and builds it; it reports firmware 4.13 because X32-Edit 4.4 won't connect to an older one).
+  2. Run it on this Mac's network address (not 127.0.0.1: it tells X32-Edit its address, and X32-Edit connects to that): `cd sim/x32-emulator && ./X32 -i 192.168.1.40` (use your Mac's IP; System Settings → Network). It saves its state to `.X32res.rc` when sent `/shutdown`.
+  3. X32-Edit → Setup → Connection: type the IP, **Manual IP**, pick "X32 Emulator", **Connect** (Sync Direction: Mixer → PC). macOS asks to let X32-Edit find devices on the local network the first time: Allow.
+  4. In this app's Console Setup the emulator shows up as "X32 Emulator"; connect. Fire cues and watch X32-Edit (its **1-16 DCA** view shows the DCA names, levels and mutes). Pressing mute group 6 in X32-Edit is Go.
+
+  Seen with the emulator: X32-Edit leaves its channel strips' name row blank (the names are there: its Channel view and the DCA strips show them), and its mute group button can stay lit after the app turns the group back off (the next press still works).
+- **The small simulator** (no build, scriptable): `python3 sim/x32_sim.py` pretends to be one on 127.0.0.1:10023 (connect to it from the app; `--bind 0.0.0.0` makes Console Setup's scan find it). Type `press 6` (mute group 6's button), `fader dca1 -10`, `mute 3`, `signal 3 -20` (a mic with signal, for channel monitoring), `dca`, `names` or `get /ch/01/eq/1/g`. It only knows the parameters the app uses.
+
 ## Console Go / Back buttons
 Two of the console's **mute group** buttons can be used as Go and Back, like TheatreMix's "Mute Group Buttons".
 
@@ -136,6 +155,38 @@ Like TheatreMix's DCA color coding, each assigned DCA's scribble strip shows wha
 
 With the show's **Dim DCA Faders** setting on, a DCA whose fader is at −∞ is dimmed (dim blue if "suppress colors" is also on, otherwise a darker version of its color), and changes back as soon as the fader comes up. Skipped cues are ignored when working out the next cue; after Line Checks the next cue is the first cue. Lines tagged `[DCACOLOR]` in the debug log show each color change and why.
 
+## Cues from the script
+**File → Import Script…** reads the show's script (a PDF) and programs the cues for line-by-line mixing, using the show's own mic plot. It reads both usual script layouts:
+- **Name above the line** (MTI, Broadway Junior, most musicals): each character's name in capitals, centered, with what they say under it; "(NATHAN)" at the top of a page carries the speaker on.
+- **Name before the line** (Samuel French and older typed scripts): "MISS STRICT: Attention, students…", and "TOFFEE:" with the lyrics under it.
+
+In both it finds scene headings ("SCENE FIVE: THE PRIDELANDS", "ACT I, Scene ii: Mission"), song cues ("(#6 – OUR LITTLE SECRET.)", "#3 - Follow the Fold"), entrances and exits, and singers. Lines in capitals are sung. Running heads, page numbers and notes in the margins (lighting or sound cues written on the script: "Q5.4", "Spot 1: Sarah", "LIGHT CUE") are left out, so a marked-up lighting script works too. A script that doesn't mark its songs gets them found from the singing (a run of sung lines after dialogue, named from its first lyric).
+
+**Scanned scripts** (pages that are pictures, or text that comes out as junk) are read with text recognition, on any computer; the import window shows the progress, and what it reads is kept, so the script opens straight away after that.
+- **On a Mac** it uses the Mac's own text recognition (about 3 pages a second on an M-series Mac). The reader (`native/script-ocr`) is built by `npm start` / `npm run package` / `npm run make` with Xcode's command line tools (`xcode-select --install`) and goes in the app's resources.
+- **Anywhere else** (Windows, Linux, or a Mac without that reader) it uses [Tesseract](https://github.com/naptha/tesseract.js), which runs inside the app with its English data bundled, so it works offline (about 2 pages a second on the same Mac: a 144-page script took about a minute). `npm start` / `package` / `make` copy it from `node_modules` into `public/tesseract/`. It also reads white-on-black headings (song titles on a dark bar), which plain Tesseract skips.
+
+Text recognition can misread a name ("MISS STICT"): match it in Who's who like any other. For testing, `localStorage.setItem('scriptOcr', 'tesseract')` in the window's developer tools makes a Mac use Tesseract too.
+
+1. **Choose Script PDF…** The dialog shows what it found (pages, scenes, songs, lines).
+2. **Who's who:** every name in the script, most lines first, matched to what's in **Show Setup**: a character (profile) or one of your ensembles. Nothing is made up: plurals like RAFIKIS and HYENAS match your ensembles of those names, "MUFASA'S VOICE" is Mufasa, and ENSEMBLE / ALL are **Company**: the Show Setup ensembles that cover everyone (e.g. Male + Female, a DCA each). Names left on **Choose…** are skipped (they're listed). The matches are saved with the show.
+3. **Options:** the **Layout** (below), a cue for each song, and **Replace the cue list** (else the cues go after the last one). The preview shows every cue with its DCAs and page.
+4. **Make Cues** (Undo takes them all back).
+
+How it's programmed (typewriter style, the way line-by-line mixing is laid out):
+- In each scene or song, the first person to speak is on DCA 1, the next new voice on DCA 2, and so on left to right, so your hand walks along the faders with the dialogue. Someone who speaks again keeps their DCA.
+- **Prepping:** a song or scene cue already holds the first people who speak in it. When the DCAs run out, the next cue fires on the last line before it: whoever is talking keeps their DCA, untouched, and DCA 1 onward are loaded with the next people to speak, so they're ready before their lines.
+- **Pacing:** cues come at songs, scenes, entrances and exits (in dialogue, not in the middle of songs), when the singing ends and dialogue starts, and when the DCAs run out. A cue that wouldn't change anything is left out.
+- **Layout → Principal bank** (instead of typewriter), like Broadway's principal faders: the characters with the most lines (at least 3) each keep their own DCA for the whole show, most lines on DCA 1, so muscle memory always finds the same person in the same place. The import window lists who's where. Everyone else takes the DCAs left over (at least two are kept for them), and borrows a principal's DCA only while that principal isn't in the scene.
+- A person in an ensemble that's up is pulled out onto their own DCA; an ensemble takes the people who aren't up already.
+- Numbered like a TheatreMix show: songs are whole numbers (song #7 is cue 7) and the cues after a song .1, .2 … (.01, .02 … when there are more than nine). Cue text follows the script: the song, the scene, "Mufasa Exits / Young Nala Enters", "Dialogue: Rafiki 3".
+
+**View → Script** (⌘P) shows the script beside the cue list (drag its edge to resize), with every cue's number in the margin where it happens. The running cue is highlighted in green and the script follows it (**Follow the cue**). Click a cue number to select the cue; select a cue and double-click the script to mark it there (or move its mark); **Unmark** removes it. Marks follow cues when they're renumbered.
+
+**File → Export Annotated Script…** saves a copy of the PDF with each cue's number beside its line and a rule across the page (songs in purple), plus a **Cue Sheet** at the end: every cue, its page, its text and who's on each DCA.
+
+The show keeps the script's location; if the show and its script are moved together, it's found next to the show.
+
 ## Themes
 **Settings** (⌘,) → **Theme**, or **View → Theme**, changes the app's colors in every window straight away:
 - **Vivid (dark)**: the default, with bright cue highlight colors.
@@ -159,7 +210,11 @@ A DCA's fader level follows the people on it. When a DCA is unassigned it drops 
 
 Both of these can be turned off in **Console Setup → DCA Recall**: **Levels follow people** (off: a DCA only moves when a level is set for the cue) and **Back restores DCAs** (off: Back fires the cue like Go). They're saved with the app's preferences, not in the show.
 
+**Console Setup → DCA Recall → New DCAs start closed** (off by default): a DCA coming up for the first time starts at −∞ instead of −20 dB, so a mic is only open once you push it up for its line (line-by-line mixing).
+
 To make a DCA go to a particular level in a cue, open the DCA in **Assign** (double-click it, or select it and press ⌘E) and tick **DCA level**; it's applied every time that cue fires. Untick it to remove it again. With no level set, a DCA coming up for the first time (it was empty, or its people have never been mixed yet) starts at −20 dB. **Back** restores a cue's DCAs: when you leave a cue, each DCA's fader and mute are remembered, and going Back into that cue puts them back exactly as they were (for every DCA that has the same people as when you left). This only applies to cues you've already been in since connecting or opening the show. Lines tagged `[LEVELS]` in the debug log show each level change and why, and DCA fader moves made on the console.
+
+**Line mutes:** every time a cue fires, each line on one of the cue's DCAs is unmuted and every other line is muted (**Show Setup → Console → Mute controlled channels that aren't on a DCA**, on by default). The mute is sent to every line every cue, even if the app thinks the line is already right, so a mute pressed on the desk or in another app, or a reconnect, can't leave a line in the cue muted. Only the show's channels (and their backups) are ever muted or unmuted: any other channel is left alone, even if it's on one of the cue's DCAs. Lines leaving the DCAs are muted before the DCAs change and lines joining are unmuted after, so nobody is briefly live on the wrong DCA. With that off, other lines are left alone but lines in the cue are still unmuted. Lines tagged `[MUTES]` in the debug log show which lines changed.
 
 ## Editing shows
 Shows can be built and edited here the way they are in TheatreMix, and saved as a `.tmixp` that TheatreMix can still open. Unlock editing first (**View → Lock Editing**, ⌘L, or the padlock).

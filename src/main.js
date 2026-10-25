@@ -12,6 +12,7 @@ import {syncConsoleButtons, setButtonActionHandler, buttonEvents, effectiveButto
 
 import {handle_open_file} from './main/fileManager.js';
 import {getThemeState, setTheme, themeBackground, openThemesFolder} from './main/theme.js';
+import {chooseScript, readScript, saveAnnotatedScript, ocrScript, ocrCache} from './main/script.js';
 import {initMenu, updateMenu, sendViewSettings, sendMenuAction, setLockEditing, setEditorSelection, handleNewShow} from './main/menuManager.js';
 import {getSettings, updateSettings, viewSettings, clean_font_size, clean_column_widths, MAIN_LABEL_CHOICES} from './main/settings.js';
 import fs from 'node:fs';
@@ -158,7 +159,7 @@ ipcMain.handle('show:save', async () => { return saveShow(); });
 ipcMain.handle('show:can_save', async () => { return getShowState().canSave; });
 
 // Console Setup preferences: DCA Recall, Cue Display and "Connect automatically"
-const CONSOLE_PREFS = ['levelsFollowPeople', 'restoreOnBack', 'autoConnect', 'cueOnScenesScreen', 'cueOnSpareDcas', 'cueOnMain'];
+const CONSOLE_PREFS = ['levelsFollowPeople', 'restoreOnBack', 'newDcaClosed', 'autoConnect', 'cueOnScenesScreen', 'cueOnSpareDcas', 'cueOnMain'];
 const consolePrefs = () => Object.fromEntries(CONSOLE_PREFS.map((key) => [key, getSettings()[key]]));
 ipcMain.handle('app:get_recall_settings', async () => consolePrefs());
 ipcMain.handle('app:set_recall_settings', async (_, changes) => {
@@ -179,6 +180,13 @@ let autoConnectStarted = false;
 ipcMain.handle('app:get_view_settings', async () => {
 	return viewSettings();
 });
+
+// The show's script (main/script.js): pick a PDF, read it, save an annotated copy
+ipcMain.handle('script:choose', async () => chooseScript());
+ipcMain.handle('script:read', async (_, file) => readScript(file));
+ipcMain.handle('script:save_annotated', async (_, {bytes, name}) => saveAnnotatedScript(bytes, name));
+ipcMain.handle('script:ocr', async (event, {file, pages}) => ocrScript(event.sender, file, pages));
+ipcMain.handle('script:ocr_cache', async (_, {file, pages, store}) => ocrCache(file, pages, store));
 
 // Theme engine (main/theme.js): the chosen theme's colors, picking one, custom themes' folder
 ipcMain.handle('theme:get', async () => getThemeState());

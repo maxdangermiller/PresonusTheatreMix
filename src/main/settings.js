@@ -33,12 +33,16 @@ const DEFAULTS = {
 	columnWidths: {},
 	/** View → Positions: position codes in the cue list's DCA cells */
 	showPositions: false,
+	/** View → Script: the show's script beside the cue list */
+	showScript: false,
 	/** View → Color-Blind DCA Colors: TheatreMix's color-blind palette (cue list and console) */
 	colorBlindDca: false,
 	/** Prevent edits (e.g. DCA levels) in the cue list */
 	lockEditing: false,
 	/** A person's DCA fader level follows them when they move to another DCA */
 	levelsFollowPeople: true,
+	/** A DCA coming up for the first time starts at -∞ instead of -20 dB (line-by-line mixing) */
+	newDcaClosed: false,
 	/** Going Back into a cue restores its DCA faders and mutes as they were when it was left */
 	restoreOnBack: true,
 	/** Console Setup → Cue Display: the current / next cue on the console's Scenes screen */
@@ -54,7 +58,7 @@ const DEFAULTS = {
 };
 
 // On/off preferences, checked when loading
-const BOOLEAN_SETTINGS = ['lockEditing', 'levelsFollowPeople', 'restoreOnBack', 'autoConnect', 'showPositions', 'colorBlindDca', 'cueOnScenesScreen', 'cueOnSpareDcas'];
+const BOOLEAN_SETTINGS = ['lockEditing', 'levelsFollowPeople', 'restoreOnBack', 'newDcaClosed', 'autoConnect', 'showPositions', 'colorBlindDca', 'showScript', 'cueOnScenesScreen', 'cueOnSpareDcas'];
 
 let settings = null;
 
@@ -119,8 +123,8 @@ function clean_column_widths(widths) {
 
 /** What the cue list needs to know about the view (sent to the renderer) */
 function viewSettings() {
-	const {rowSize, fontSize, columnWidths, lockEditing, showPositions, colorBlindDca} = getSettings();
-	return {rowSize, fontSize, columnWidths, lockEditing, showPositions, colorBlindDca};
+	const {rowSize, fontSize, columnWidths, lockEditing, showPositions, colorBlindDca, showScript} = getSettings();
+	return {rowSize, fontSize, columnWidths, lockEditing, showPositions, colorBlindDca, showScript};
 }
 
 /**

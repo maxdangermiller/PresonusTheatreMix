@@ -18,6 +18,11 @@ import { EventEmitter } from 'node:events';
 import { debugLog, describe } from './debugLog.js';
 
 const MUTE_GROUP_COUNT = 8;
+// A Behringer X32 has 6 mute groups
+const X32_MUTE_GROUP_COUNT = 6;
+
+/** Mute groups on the connected console (all 8 when there isn't one) */
+const consoleGroupCount = () => client?.kind === 'x32' ? X32_MUTE_GROUP_COUNT : MUTE_GROUP_COUNT;
 
 // Ignore a second press of the same button within this time (contact bounce / double taps)
 const DEBOUNCE_MS = 300;
@@ -319,7 +324,7 @@ const syncConsoleButtons = (show) => {
 	if (client === null) return;
 
 	// Snapshot every mute group, so the log shows which ones are free to use
-	for (let group = 1; group <= MUTE_GROUP_COUNT; group++) {
+	for (let group = 1; group <= consoleGroupCount(); group++) {
 		const name = client.state.get(`mutegroup/mutegroup${group}username`);
 		const members = groupMembers(group);
 		const on = decodeOn(client.state.get(`mutegroup/mutegroup${group}`));
@@ -411,7 +416,7 @@ const getButtonSetup = (show) => {
 	const {map, source} = effectiveButtonMap(show);
 
 	const groups = [];
-	for (let group = 1; group <= MUTE_GROUP_COUNT; group++) {
+	for (let group = 1; group <= consoleGroupCount(); group++) {
 		const members = client ? groupMembers(group) : null;
 		groups.push({
 			group,

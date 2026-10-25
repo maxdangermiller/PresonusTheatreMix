@@ -9,6 +9,10 @@ import {
 } from '../utils/show_edits.js';
 import AssignDialog from './AssignDialog.jsx';
 import PreferencesDialog from './PreferencesDialog.jsx';
+import ScriptView from './ScriptView.jsx';
+import ScriptImportDialog from './ScriptImportDialog.jsx';
+import { open_script, script_lines } from './utils/pdf.js';
+import { annotate_script } from './utils/script_export.js';
 import RenumberDialog from './RenumberDialog.jsx';
 import ShowSetupDialog from './ShowSetupDialog.jsx';
 import EnsembleSetupDialog from './EnsembleSetupDialog.jsx';
@@ -260,12 +264,17 @@ const Editor = ({showData, setShowData}) => {
 	// View menu preferences
 	const [view, set_view] = useState({rowSize: 'medium', fontSize: null, columnWidths: {}, lockEditing: false, showPositions: false, colorBlindDca: false});
 	const [prefs_open, set_prefs_open] = useState(false);
+	const [script_import_open, set_script_import_open] = useState(false);
+	// View → Script: the panel's share of the window (drag its left edge), and the window's width
+	const [script_share, set_script_share] = useState(() => { try { return Number(localStorage.getItem('scriptShare')) || 0.42; } catch { return 0.42; } });
+	const [container_width, set_container_width] = useState(1200);
+	const containerRef = useRef(null);
 	// Column widths while one is being dragged (saved when the drag ends)
 	const [drag_widths, set_drag_widths] = useState(null);
 	const column_widths = drag_widths ?? view.columnWidths ?? {};
 
 	const dialog_open = assign_dialog !== null || renumber_dialog !== null || jump_dialog_open || setup_dialog !== null
-		|| utilisation_open || mark_dialog !== null || prefs_open;
+		|| utilisation_open || mark_dialog !== null || prefs_open || script_import_open;
 	const can_edit = showData !== null && !view.lockEditing;
 
 	// TheatreMix: Show Setup → QLab → "Recall QLab cues" adds a QLab column
@@ -352,6 +361,49 @@ const Editor = ({showData, setShowData}) => {
 	const width_of = (col) => column_widths[col] ?? (resized ? min_width(col) : {cue: CUE_COLUMN_WIDTH, text: TEXT_COLUMN_WIDTH, qlab: QLAB_COLUMN_WIDTH}[col]);
 	const table_width = columns.reduce((sum, col) => sum + (column_widths[col] ?? min_width(col)), 0);
 	const table_size = resized ? {width: table_width, minWidth: 0} : {minWidth: table_width};
+
+	/** File → Export Annotated Script: the script with the cues marked, and a cue sheet */
+	const exportScript = async () => {
+		const file = showRef.current?.consoleSetup?.scriptFile;
+		if (!file) { flash("Import the show's script first (File → Import Script)"); return; }
+		try {
+			const {bytes} = await open_script(file);
+			const annotated = await annotate_script(bytes, showRef.current, (await script_lines(file)).lines);
+			const name = `${file.split("/").pop().replace(/\.pdf$/i, "")} (cues).pdf`;
+			const saved = await window.scriptApi.saveAnnotated(annotated, name);
+			if (saved) flash(`Saved ${saved.split("/").pop()}`, 'info');
+		} catch (error) {
+			flash(`Couldn't export the script: ${error.message}`);
+		}
+	}
+
+	/** Drag the Script panel's left edge */
+	const startScriptResize = (event) => {
+		event.preventDefault();
+		const box = containerRef.current?.getBoundingClientRect();
+		if (!box) return;
+		let share = script_share;
+		const move = (e) => {
+			share = Math.min(0.75, Math.max(0.2, (box.right - e.clientX) / box.width));
+			set_script_share(share);
+		};
+		const up = () => {
+			window.removeEventListener('mousemove', move);
+			window.removeEventListener('mouseup', up);
+			try { localStorage.setItem('scriptShare', String(share)); } catch { /* not kept */ }
+		};
+		window.addEventListener('mousemove', move);
+		window.addEventListener('mouseup', up);
+	}
+
+	// The window's width, for the Script panel's size
+	useEffect(() => {
+		const box = containerRef.current;
+		if (!box) return;
+		const observer = new ResizeObserver(([entry]) => set_container_width(entry.contentRect.width));
+		observer.observe(box);
+		return () => observer.disconnect();
+	}, [showData === null]);
 
 	/** A short message over the cue list: kind 'error' (the default, an edit that couldn't be done) or 'info' */
 	const flash = (message, kind = 'error') => {
@@ -953,6 +1005,13 @@ const Editor = ({showData, setShowData}) => {
 			case 'store-settings':
 				storeSettings();
 				break;
+			case 'import-script':
+				set_cell_edit(null);
+				set_script_import_open(true);
+				break;
+			case 'export-script':
+				exportScript();
+				break;
 			case 'preferences':
 				set_cell_edit(null);
 				set_prefs_open(true);
@@ -1272,7 +1331,7 @@ const Editor = ({showData, setShowData}) => {
 
 	const assignCue = assign_dialog && showData.cues.find((c) => cue_key(c) === assign_dialog.key);
 
-	return <div style={CONTAINER_STYLE}>
+	return <div style={CONTAINER_STYLE} ref={containerRef}>
 		<div style={{flex: 1, minWidth: 0, display: "flex", flexDirection: "column"}}>
 		<div style={SCROLL_BOX_STYLE}>
 		<table style={{...TABLE_STYLE, ...table_size}}>
@@ -1339,6 +1398,20 @@ const Editor = ({showData, setShowData}) => {
 		<BackupTray show={showData}/>
 		</div>
 
+		{view.showScript ? <>
+			<div onMouseDown={startScriptResize} style={{width: 6, cursor: 'col-resize', flexShrink: 0}} title="Drag to resize the script"/>
+			<ScriptView
+				show={showData}
+				cues={cues}
+				width={Math.round(container_width * script_share)}
+				activeKey={cue_index >= 0 && cues[cue_index] ? cue_key(cues[cue_index]) : null}
+				selectedKey={selection && selection.focus.row >= 0 && cues[selection.focus.row] ? cue_key(cues[selection.focus.row]) : null}
+				onSelectCue={(key) => selectKey(showData, key, 'cue')}
+				runEdit={runEdit}
+				onImport={() => set_script_import_open(true)}
+			/>
+		</> : null}
+
 		{toast ? <div style={{...TOAST_STYLE, ...(toast.kind === 'info' ? TOAST_INFO_STYLE : {})}} role="status" data-toast>{toast.message}</div> : null}
 
 		{assignCue && (
@@ -1364,6 +1437,10 @@ const Editor = ({showData, setShowData}) => {
 			onSave: async (ops) => { if (await runEdit(ops, {setup: true})) set_setup_dialog(null); },
 			onCancel: () => set_setup_dialog(null),
 		})}
+
+		{script_import_open && (
+			<ScriptImportDialog show={showData} runEdit={runEdit} onClose={() => set_script_import_open(false)}/>
+		)}
 
 		{prefs_open && (
 			<PreferencesDialog

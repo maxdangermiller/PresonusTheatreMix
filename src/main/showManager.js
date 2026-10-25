@@ -156,7 +156,10 @@ async function closeShow() {
 function getShowState() {
 	return {
 		hasShow: currentShow !== null,
+		path: currentPath,
 		isTmixp: is_tmixp(),
+		// File → Import Script has been used: Export Annotated Script has something to export
+		hasScript: Boolean(currentShow?.consoleSetup?.scriptFile),
 		canUndo: undoStack.length > 0,
 		canRedo: redoStack.length > 0,
 		// TheatreMix: Show Setup → QLab → "Recall QLab cues"

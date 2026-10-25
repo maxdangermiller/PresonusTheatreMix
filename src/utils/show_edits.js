@@ -132,12 +132,45 @@ const set_dca_level_entry = (show, key, dca, level) => {
 	}
 }
 
-/** Move a cue's DCA levels to a new key (renumbering) */
+/** Move a cue's DCA levels (and its place in the script) to a new key (renumbering) */
 const move_dca_levels = (show, from, to) => {
+	move_script_marks(show, [[from, to]]);
 	if (!show.dcaLevels?.[from] || from === to) return;
 	show.dcaLevels[to] = show.dcaLevels[from];
 	delete show.dcaLevels[from];
 }
+
+// #region Script marks
+// Where each cue is in the show's script (Script view, File → Import Script): {cue key: {page, y}},
+// kept as JSON in this app's consoleSetup table (scriptMarks), with the script's file (scriptFile)
+// and how its names match the show's characters (scriptMap)
+
+/** @returns {Object<string, {page: Number, y: Number}>} */
+const script_marks = (show) => {
+	try { return JSON.parse(show.consoleSetup?.scriptMarks || "{}"); } catch { return {}; }
+}
+
+const save_script_marks = (show, marks) => {
+	show.consoleSetup = {...show.consoleSetup};
+	if (Object.keys(marks).length) show.consoleSetup.scriptMarks = JSON.stringify(marks);
+	else delete show.consoleSetup.scriptMarks;
+}
+
+/**
+ * Cues renumbered or deleted: their marks follow (to null: removed)
+ * @param {[String, String | null][]} moves [from key, to key]
+ */
+const move_script_marks = (show, moves) => {
+	const marks = script_marks(show);
+	const moving = moves.filter(([from, to]) => marks[from] && from !== to);
+	if (!moving.length) return;
+	const taken = Object.fromEntries(moving.map(([from]) => [from, marks[from]]));
+	for (const [from] of moving) delete marks[from];
+	for (const [from, to] of moving) if (to) marks[to] = taken[from];
+	save_script_marks(show, marks);
+}
+
+// #endregion
 
 /** A new, empty cue with every column TheatreMix has */
 const blank_cue = (show, number, point) => {
@@ -229,6 +262,7 @@ const OPS = {
 		const keys = new Set(cues);
 		show.cues = show.cues.filter((c) => !keys.has(cue_key(c)));
 		for (const key of keys) delete show.dcaLevels?.[key];
+		move_script_marks(show, [...keys].map((key) => [key, null]));
 	},
 
 	/**
@@ -251,6 +285,7 @@ const OPS = {
 			Object.assign(m.cue, from_value(m.value));
 			if (levels[m.from]) show.dcaLevels[cue_key(m.cue)] = levels[m.from];
 		}
+		move_script_marks(show, moves.map((m) => [m.from, cue_key(m.cue)]));
 	},
 
 	/**
@@ -380,6 +415,47 @@ const OPS = {
 		}
 	},
 
+	/** {file, map}: the show's script (a PDF's path) and how its names match the show (null removes) */
+	set_script(show, {file, map}) {
+		show.consoleSetup = {...show.consoleSetup};
+		if (file !== undefined) { if (file) show.consoleSetup.scriptFile = file; else delete show.consoleSetup.scriptFile; }
+		if (map !== undefined) { if (map) show.consoleSetup.scriptMap = JSON.stringify(map); else delete show.consoleSetup.scriptMap; }
+	},
+
+	/** {cue, mark: {page, y} | null}: where a cue goes in the script */
+	set_script_mark(show, {cue, mark}) {
+		find_cue(show, cue);
+		const marks = script_marks(show);
+		if (mark) marks[cue] = {page: Number(mark.page), y: Math.round(Number(mark.y))}; else delete marks[cue];
+		save_script_marks(show, marks);
+	},
+
+	/**
+	 * {cues, replace}: add cues made from the script (utils/script_cues.js). Each is
+	 * {number, point, name, dcas: [{dca, channels, label, profiles}], mark}. replace: delete every cue
+	 * but Line Checks first. A cue whose number is taken is an error.
+	 */
+	add_cues(show, {cues, replace = false}) {
+		if (replace) {
+			const gone = show.cues.filter((c) => cue_value(c) > 0).map(cue_key);
+			OPS.delete_cues(show, {cues: gone});
+		}
+		const marks = script_marks(show);
+		for (const c of cues) {
+			const key = dca_level_key(c.number, c.point);
+			if (show.cues.some((x) => cue_key(x) === key)) throw new Error(`There's already a cue ${key}`);
+			const cue = blank_cue(show, c.number, c.point);
+			cue.name = c.name ?? "";
+			show.cues.push(cue);
+			for (const d of c.dcas ?? []) {
+				OPS.set_dca(show, {cue: key, dca: d.dca, channels: d.channels, label: d.label ?? null, profiles: d.profiles ?? {}, exclusive: false});
+			}
+			if (c.mark) marks[key] = {page: c.mark.page, y: Math.round(c.mark.y)};
+		}
+		save_script_marks(show, marks);
+		return {count: cues.length};
+	},
+
 	/** {cue, dca, level}: this app's level for a DCA in a cue (dB, or null for none) */
 	set_dca_level(show, {cue, dca, level}) {
 		find_cue(show, cue);
@@ -480,6 +556,7 @@ const ensemble_channels = (ensemble) => ({
 });
 
 export {
+	script_marks,
 	MAX_DCAS, TMIX_DCAS, DEFAULT_DCAS, MIN_OFFSET, MAX_OFFSET, uses_all_dcas, show_dcas,
 	dca_field, cue_value, from_value, cue_key, parse_channels, parse_map, serialize_map,
 	sorted_cues, default_position, default_profile, read_dca, cue_channel_dcas,

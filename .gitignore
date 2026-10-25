@@ -95,3 +95,9 @@ logs/
 # Simulator: discovery clients remembered between runs
 sim/.probe_targets.json
 __pycache__/
+# X32 emulator, built by sim/build_x32_emulator.sh (third-party source)
+sim/x32-emulator/
+# The scanned-script reader, built by scripts/build-ocr.js
+native-bin/
+# Tesseract for scanned scripts, copied from node_modules by scripts/copy-tesseract.js
+public/tesseract/

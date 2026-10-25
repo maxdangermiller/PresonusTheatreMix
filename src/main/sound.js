@@ -7,6 +7,7 @@ import zlib from 'node:zlib';
 import { EventEmitter } from 'node:events';
 
 import { Client } from '@featherbear/presonus-studiolive-api';
+import { X32Client, X32_PORT, XINFO_REQUEST, parse_x32_info } from './consoles/x32.js';
 import {getShow} from './showManager.js';
 import {attachConsoleButtons, detachConsoleButtons, syncConsoleButtons} from './consoleButtons.js';
 import {debugLog} from './debugLog.js';
@@ -287,14 +288,16 @@ const discover = async (event, {timeout}) => {
 		 * @param {String} via which socket received it, for the log
 		 */
 		const handle_message = (packet, rinfo, via) => {
-			const parsed = parse_discovery_packet(packet);
+			// A StudioLive announcement, or an X32 answering /xinfo
+			const parsed = parse_discovery_packet(packet) ?? parse_x32_info(packet);
 			if (parsed === null) return;
 
 			const is_new = !devices.has(parsed.serial);
 			const device = {
+				kind: 'studiolive',
 				...parsed,
 				ip: rinfo.address,
-				port: CONTROL_PORT,
+				port: parsed.kind === 'x32' ? X32_PORT : CONTROL_PORT,
 				timestamp: new Date().toLocaleTimeString(),
 			};
 			devices.set(parsed.serial, device);
@@ -348,6 +351,10 @@ const discover = async (event, {timeout}) => {
 			for (const {probe, iface, address} of probes) {
 				probe.send(DISCOVERY_PROBE, DISCOVERY_PORT, '255.255.255.255', (err) => {
 					if (err) debugLog('DISCOVERY', `Probe from ${iface} (${address}) failed: ${err.code ?? err.message}`);
+				});
+				// Behringer X32 / Midas M32: ask "/xinfo" on its OSC port; it answers on this socket
+				probe.send(XINFO_REQUEST, X32_PORT, '255.255.255.255', (err) => {
+					if (err) debugLog('DISCOVERY', `X32 probe from ${iface} (${address}) failed: ${err.code ?? err.message}`);
 				});
 			}
 		}
@@ -432,17 +439,18 @@ const describe_socket_error = (err) => {
  * @returns {Promise<{ok: boolean, error?: String}>} connection result
  * @async
  */
-const connect = async (_event, {host, port, name, serial}) => {
+const connect = async (_event, {host, port, name, serial, kind}) => {
 	// Ignore repeat clicks while an attempt is already running
 	if (pending_connect !== null) {
 		console.log("[SOUND:connect]: Connection attempt already in progress");
 		return pending_connect;
 	}
 
-	port = Number(port) || CONTROL_PORT;
-	pending_connect = do_connect(host, port, name).then((result) => {
+	kind = kind === 'x32' ? 'x32' : 'studiolive';
+	port = Number(port) || (kind === 'x32' ? X32_PORT : CONTROL_PORT);
+	pending_connect = do_connect(host, port, name, kind).then((result) => {
 		// Remember it for auto-connect on the next launch
-		if (result?.ok) updateSettings({lastConsole: {host, port, name: name ?? null, serial: serial ?? null}});
+		if (result?.ok) updateSettings({lastConsole: {host, port, name: name ?? null, serial: serial ?? null, kind}});
 		return result;
 	}).finally(() => {
 		pending_connect = null;
@@ -498,7 +506,7 @@ const auto_connect = async (sender) => {
 	}
 
 	debugLog('AUTOCONNECT', `Found ${label} at ${found.ip}; connecting`);
-	return connect(null, {host: found.ip, port: found.port, name: found.name, serial: found.serial});
+	return connect(null, {host: found.ip, port: found.port, name: found.name, serial: found.serial, kind: found.kind});
 }
 
 /**
@@ -522,7 +530,7 @@ const disconnect = (message) => {
  * @param {String} [name] console name, for the status tooltip
  * @returns {Promise<{ok: boolean, error?: String}>}
  */
-const do_connect = async (host, port, name) => {
+const do_connect = async (host, port, name, kind) => {
 	console.log(`[SOUND:connect]: Connecting to Sound Board at ip address: ${host} on port ${port}.`);
 
 	// Only ever keep one client alive, otherwise old ones keep reconnecting forever
@@ -530,12 +538,17 @@ const do_connect = async (host, port, name) => {
 
 	set_console_status({state: 'connecting', host, name});
 
-	const client = new Client({host: host, port: port}, {
-		autoreconnect: true,
-		logLevel: "debug",
-		connectTimeout: CONNECT_ATTEMPT_TIMEOUT,
-		localAddress: find_local_address(host),
-	});
+	// A Behringer X32 / Midas M32 gets a client that speaks its OSC but behaves like the
+	// StudioLive API's (main/consoles/x32.js), so everything below works for both
+	const client = kind === 'x32'
+		? new X32Client({host, port}, {localAddress: find_local_address(host)})
+		: new Client({host: host, port: port}, {
+			autoreconnect: true,
+			logLevel: "debug",
+			connectTimeout: CONNECT_ATTEMPT_TIMEOUT,
+			localAddress: find_local_address(host),
+		});
+	debugLog('CONNECT', `Connecting to ${kind === 'x32' ? "an X32 (OSC)" : "a StudioLive (UCNet)"} at ${host}:${port}`);
 	presonusClient = client;
 	dca_faders = new Map();
 	dca_mutes = new Map();
@@ -567,9 +580,10 @@ const do_connect = async (host, port, name) => {
 		}
 
 		// Line muted / unmuted on the console
+		// (as true / false, or 1 / 0: either way it's kept)
 		const line_mute = /^line\/ch(\d+)\/mute$/.exec(name);
-		if (line_mute && typeof value === 'boolean') {
-			line_mutes.set(Number(line_mute[1]), value);
+		if (line_mute && (typeof value === 'boolean' || typeof value === 'number')) {
+			line_mutes.set(Number(line_mute[1]), typeof value === 'boolean' ? value : value >= 0.5);
 			return;
 		}
 
@@ -1053,9 +1067,14 @@ const read_line_mute = (ch) => {
 }
 
 /**
- * Mute the show's channels that aren't in any of the cue's DCAs, and unmute the ones that are,
- * so only lines on a DCA ever reach the output (TheatreMix: "consoleMuteDCAUnassign", on unless
- * the show turns it off). Lines are only sent a mute when it changes.
+ * Lines in the cue's DCAs are unmuted; the show's other lines are muted, so only lines on a DCA
+ * ever reach the output (TheatreMix: "consoleMuteDCAUnassign"; with it off, lines aren't muted,
+ * but lines in the cue are still unmuted).
+ *
+ * Every line is sent its mute every cue, not only when it seems to change: the console can be
+ * changed without the app hearing about it (a mute pressed on the desk or in another app, a
+ * reconnect), and a line in the cue must never stay muted because the app thought it was on.
+ * Only the show's channels (with their backups and the spare) are ever muted or unmuted.
  *
  * Called in two passes around the DCA writes, so nobody is briefly live on the wrong DCA:
  * 'mute' before (channels leaving the DCAs go quiet first), 'unmute' after (channels joining
@@ -1064,19 +1083,26 @@ const read_line_mute = (ch) => {
  * @param {'mute' | 'unmute'} pass
  */
 const write_line_mutes = (cue_channels, pass) => {
-	if (getShow()?.config?.consoleMuteDCAUnassign === "0") return;
-
+	const mute_others = getShow()?.config?.consoleMuteDCAUnassign !== "0";
 	const assigned = new Set(cue_channels);
 	const changed = [];
-	// The show's channels and their backups (a switched channel's backup carries it)
-	for (const ch of new Set([...get_show_channels(), ...get_backups().values()])) {
+	// Only the show's channels, their backups and the spare (a switched channel's backup carries
+	// it): any other channel is never touched, even if it's on one of the cue's DCAs
+	const lines = new Set([...get_show_channels(), ...get_backups().values(), ...(get_spare() ? [get_spare()] : [])]);
+	for (const ch of [...lines].sort((a, b) => a - b)) {
 		const muted = !assigned.has(ch);
-		if (muted !== (pass === 'mute') || read_line_mute(ch) === muted) continue;
+		if (muted !== (pass === 'mute') || (muted && !mute_others)) continue;
 
+		const before = read_line_mute(ch);
 		const selector = {type: 'LINE', channel: ch};
-		if (muted) presonusClient.mute(selector); else presonusClient.unmute(selector);
+		try {
+			if (muted) presonusClient.mute(selector); else presonusClient.unmute(selector);
+		} catch (error) {
+			debugLog('MUTES', `Couldn't ${muted ? "mute" : "unmute"} channel ${ch}`, error.message);
+			continue;
+		}
 		line_mutes.set(ch, muted);
-		changed.push(ch);
+		if (before !== muted) changed.push(ch);
 	}
 
 	if (changed.length) {
@@ -1382,7 +1408,8 @@ const carried_level = (channels) => {
  *  - otherwise, when the DCA gets different channels, it takes the level those people were
  *    last mixed at (the fader of the DCA they came from), so their offset follows them
  *  - otherwise, when the DCA comes up for the first time (it was empty, or none of its people
- *    have been mixed yet), it goes to NEW_DCA_LEVEL (-20 dB)
+ *    have been mixed yet), it goes to NEW_DCA_LEVEL (-20 dB), or -∞ with Console Setup's
+ *    "New DCAs start closed" 
  *  - otherwise (same channels) the fader is left where it is
  * Mute is only sent when the channel assignment changes, so a DCA that keeps its channels
  * isn't touched and live fader moves are kept. An unassigned DCA is muted and pulled to -∞
@@ -1432,11 +1459,12 @@ const write_dca = (cue_object, dca, restore) => {
 			(!previous?.channels || channels.every((ch) => !channel_levels.has(ch)));
 		const position = configured !== null ? level_to_fader(configured)
 			: carried !== null ? carried
-			: first_time ? level_to_fader(NEW_DCA_LEVEL)
+			// Console Setup → DCA Recall: "New DCAs start closed" (line-by-line: open it for the line)
+			: first_time ? (getSettings().newDcaClosed ? 0 : level_to_fader(NEW_DCA_LEVEL))
 			: null;
 		const source = configured !== null ? "set for this cue"
 			: carried !== null ? "where these channels were last mixed"
-			: first_time ? "first time up, default level"
+			: first_time ? (getSettings().newDcaClosed ? "first time up, closed by Console Setup" : "first time up, default level")
 			: !getSettings().levelsFollowPeople ? "levels don't follow people (Console Setup), fader left as is"
 			: "no level set, fader left as is";
 
@@ -1930,6 +1958,7 @@ const sync_channel_monitor = () => {
  */
 const probe_user_layer = async () => {
 	if (presonusClient === null || console_status.state !== 'connected') return {ok: false, error: "Connect to the console first"};
+	if (presonusClient.kind === 'x32') return {ok: false, error: "The User Layer is a StudioLive feature; the X32 doesn't have one."};
 	const socket = presonusClient.conn;
 	let raw = Buffer.alloc(0);
 	const tap = (bytes) => { raw = Buffer.concat([raw, bytes]); };

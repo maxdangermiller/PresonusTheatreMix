@@ -14,6 +14,8 @@ module.exports = {
 		*/
 		icon: './build/icons/tmps',
 		osxSign: false, // Disables the blocking macOS keychain lookup
+		// The scanned-script reader (scripts/build-ocr.js, macOS only), next to the app's resources
+		...(require('node:fs').existsSync('./native-bin/script-ocr') ? {extraResource: ['./native-bin/script-ocr']} : {}),
 		// macOS 15+ blocks LAN traffic (console discovery + control) unless the app declares this
 		extendInfo: {
 			NSLocalNetworkUsageDescription: 'Presonus TheatreMix needs local network access to find and control your StudioLive console.',
@@ -51,6 +53,13 @@ module.exports = {
 		/^\/\.patches/,   // Ignores editor configuration files
 		/^\/\.presonous/,   // Ignores editor configuration files
 		/node_modules\/(?!(better-sqlite3|bindings|file-uri-to-path)\/)/,   // Ignores raw module files
+		// Built into the app elsewhere: Tesseract (copied into the renderer build from public/),
+		// the scanned-script reader (an extra resource), and their build scripts; and the simulators
+		/^\/public/,
+		/^\/native/,
+		/^\/native-bin/,
+		/^\/scripts/,
+		/^\/sim/,
 		],
 	},
 	rebuildConfig: {},

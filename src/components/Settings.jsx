@@ -209,7 +209,8 @@ const Settings = () => {
 					board.ip,
 					board.port,
 					board.placeholder ? undefined : board.name,
-					board.placeholder ? undefined : board.serial
+					board.placeholder ? undefined : board.serial,
+					board.kind ?? 'studiolive'
 				);
 
 				console.log('Connection result:', result);

@@ -184,8 +184,8 @@ const handle_row_size = (rowSize) => {
  * @returns {Electron.MenuItemConstructorOptions[]}
  */
 const buildTemplate = () => {
-	const {hasShow, isTmixp, qLabEnabled, canSave} = getShowState();
-	const {recentFiles, rowSize, fontSize, lockEditing, showPositions, colorBlindDca} = getSettings();
+	const {hasShow, isTmixp, qLabEnabled, canSave, hasScript} = getShowState();
+	const {recentFiles, rowSize, fontSize, lockEditing, showPositions, colorBlindDca, showScript} = getSettings();
 	const themeState = getThemeState();
 
 	// Feature not in this app yet
@@ -239,6 +239,9 @@ const buildTemplate = () => {
 				{ label: 'Save As...', accelerator: 'CmdOrCtrl+Shift+S', enabled: hasShow, click: () => saveShowAs() },
 				{ label: 'Export Notes...', enabled: hasShow, click: () => exportNotes() },
 				{ label: 'Merge Cues from .tmix...', enabled: isTmixp, click: handle_merge_tmix },
+				{ type: 'separator' },
+				{ label: 'Import Script...', enabled: hasShow, click: () => sendMenuAction('import-script') },
+				{ label: 'Export Annotated Script...', enabled: hasScript, click: () => sendMenuAction('export-script') },
 				{ type: 'separator' },
 				{ label: 'Show Setup', enabled: hasShow, click: () => sendMenuAction('show-setup') },
 				{ label: 'Ensemble Setup', enabled: hasShow, click: () => sendMenuAction('ensemble-setup') },
@@ -318,6 +321,8 @@ const buildTemplate = () => {
 					}))
 				},
 				{ type: 'separator' },
+				{ label: 'Script', type: 'checkbox', accelerator: 'CmdOrCtrl+P', checked: showScript, enabled: hasShow,
+					click: (item) => { updateSettings({showScript: item.checked}); sendViewSettings(); } },
 				{ label: 'Channel Utilisation', accelerator: 'CmdOrCtrl+U', enabled: hasShow, click: () => sendMenuAction('channel-utilisation') },
 				{ label: 'Active Cue Info', accelerator: 'CmdOrCtrl+I', click: () => openActiveCueWindow() },
 				...(isMac ? [] : [{ label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => sendMenuAction('preferences') }]),
